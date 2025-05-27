@@ -425,10 +425,12 @@ func measureRepair(ctx context.Context, bc benchCluster, mc *meta.Client, pool *
 	}
 	runsBefore := before.Repair.Runs
 
-	t0 := time.Now()
 	if err := bc.Kill(ctx, victim.Name); err != nil {
 		return nil, err
 	}
+	// Clock starts once the kill is confirmed (for a remote cluster the kill
+	// command itself can take a moment).
+	t0 := time.Now()
 	// Detection: the victim leaves the ring.
 	var downEpoch uint64
 	for {
