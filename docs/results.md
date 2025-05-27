@@ -104,6 +104,27 @@ trials per configuration.
   not the default because it had spurious elections on the overloaded
   laptop, where stalls reached hundreds of ms.
 
+## Kubernetes (kind, 4 nodes on one Linux host)
+
+`scripts/kind-e2e.sh` builds the image and creates a fresh kind cluster (1
+control plane + 3 workers). It applies `deploy/k8s` (Cassandra, MinIO, the
+Raft StatefulSet and the storage StatefulSet), then exercises it:
+
+| Step | Result |
+|---|---|
+| Deploy | all StatefulSets rolled out; Raft elected a leader over the pods' stable DNS names |
+| Smoke Job, 6 storage pods | 40 files × 8 MiB written and read back by 8 clients, all matching |
+| `kubectl scale` storage to 50 | 50 pods joined the ring, spread 17 / 16 / 17 across the three workers |
+| Throughput Job on 50 storage pods | 408 MB/s upload, **1,472 MB/s download** (30 s), 0 errors, 0 checksum mismatches |
+| Storage pod force-deleted during a smoke Job | the Job still passed; the pod came back with the same identity and volume in 5.8 s, inside `dead-after`, so the ring never changed |
+| Raft leader pod force-deleted | new leader seen 0.17 s later (term 2 → 3) |
+
+All of it runs on one host, so the throughput reflects that host's CPU and
+disk, not a network. For the leader-pod deletion, Kubernetes delivers SIGTERM
+before killing the container, and `dfs-meta` hands leadership over on
+SIGTERM. So this likely measured the planned-handover path. The crash
+(SIGKILL) numbers are in the failover table above.
+
 ## Earlier: 50–64 processes on one laptop
 
 Before the Slurm deployment, the same benchmarks ran as 53–67 OS processes

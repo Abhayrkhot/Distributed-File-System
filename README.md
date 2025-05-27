@@ -22,6 +22,7 @@ failover. Details and caveats are in [docs/results.md](docs/results.md).
 | Storage-node crash | marked DOWN in 4.8 s; 113 chunks re-replicated in a 0.94 s pass; 0 of 2,304 chunks under-replicated afterwards |
 | Raft leader crash → writes again | **193 ms** median (p90 228 ms) over 30 SIGKILLs, against 2.1 s with hashicorp/raft defaults; 5 ms for a planned handover |
 | Control-plane stability | 0 leader elections and 0 false node evictions during the 60-machine runs |
+| Kubernetes (kind, 4 nodes) | scaled to 50 storage pods; 1,472 MB/s download with 0 errors; a storage pod and the Raft leader pod force-deleted with no client errors |
 
 The aggregate rate is bounded by the single client machine's ~10 Gb/s
 link, not by the cluster.
@@ -165,6 +166,17 @@ The JSON results are in `bench/results-hpc/` and `bench/results/`, and
 names, PVCs, PodDisruptionBudget), a storage StatefulSet (scale it with
 `kubectl scale`), Cassandra and MinIO, plus a smoke-test Job.
 
+`scripts/kind-e2e.sh` does the whole thing on a fresh 4-node kind cluster:
+deploy, smoke test, scale storage to 50 pods, a throughput Job, then
+force-delete a storage pod mid-traffic and the Raft leader pod (results in
+[docs/results.md](docs/results.md#kubernetes-kind-4-nodes-on-one-linux-host)).
+
+```bash
+scripts/kind-e2e.sh
+```
+
+Or step by step:
+
 ```bash
 make kind-up
 ```
@@ -176,6 +188,10 @@ make kind-deploy
 ```bash
 make kind-smoke
 ```
+
+On Linux, multi-node kind needs a higher inotify limit
+(`fs.inotify.max_user_instances=512`), or kube-proxy on the workers fails
+with "too many open files" and pods can't resolve DNS.
 
 ## Layout
 

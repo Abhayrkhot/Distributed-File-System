@@ -1,0 +1,87 @@
+=== 04:49:44 fresh cluster + deploy
+Creating cluster "dfs" ...
+ • Ensuring node image (kindest/node:v1.37.0) 🖼️  ...
+ ✓ Ensuring node image (kindest/node:v1.37.0) 🖼️
+ • Preparing nodes 📦 📦 📦 📦   ...
+ ✓ Preparing nodes 📦 📦 📦 📦 
+ • Writing configuration 📜  ...
+ ✓ Writing configuration 📜
+ • Starting control-plane 🕹️  ...
+ ✓ Starting control-plane 🕹️
+ • Installing CNI 🔌  ...
+ ✓ Installing CNI 🔌
+ • Installing StorageClass 💾  ...
+ ✓ Installing StorageClass 💾
+ • Joining worker nodes 🚜  ...
+ ✓ Joining worker nodes 🚜
+Set kubectl context to "kind-dfs"
+You can now use your cluster with:
+kubectl cluster-info --context kind-dfs
+Have a question, bug, or feature request? Let us know! https://kind.sigs.k8s.io/#community 🙂
+sha256:12551c9a67041caa7df9e7ffeb1e5f33f61215593e1474289caf0e14440e5902
+Image: "dfs:dev" with ID "sha256:12551c9a67041caa7df9e7ffeb1e5f33f61215593e1474289caf0e14440e5902" not yet present on node "dfs-worker3", loading...
+Image: "dfs:dev" with ID "sha256:12551c9a67041caa7df9e7ffeb1e5f33f61215593e1474289caf0e14440e5902" not yet present on node "dfs-control-plane", loading...
+Image: "dfs:dev" with ID "sha256:12551c9a67041caa7df9e7ffeb1e5f33f61215593e1474289caf0e14440e5902" not yet present on node "dfs-worker2", loading...
+Image: "dfs:dev" with ID "sha256:12551c9a67041caa7df9e7ffeb1e5f33f61215593e1474289caf0e14440e5902" not yet present on node "dfs-worker", loading...
+namespace/dfs created
+secret/dfs-s3 created
+service/cassandra created
+service/dfs created
+service/dfs-meta created
+service/dfs-storage created
+service/minio created
+statefulset.apps/cassandra created
+statefulset.apps/dfs-meta created
+statefulset.apps/dfs-storage created
+statefulset.apps/minio created
+poddisruptionbudget.policy/dfs-meta created
+poddisruptionbudget.policy/dfs-storage created
+NAME                STATUS   ROLES           AGE    VERSION
+dfs-control-plane   Ready    control-plane   109s   v1.37.0
+dfs-worker          Ready    <none>          99s    v1.37.0
+dfs-worker2         Ready    <none>          99s    v1.37.0
+dfs-worker3         Ready    <none>          99s    v1.37.0
+leader: dfs-meta-2 (dfs-meta-2.dfs-meta.dfs.svc.cluster.local:8000)  term 2  commit 8
+MEMBER      RAFT                                            GRPC                                            ROLE
+dfs-meta-0  dfs-meta-0.dfs-meta.dfs.svc.cluster.local:7000  dfs-meta-0.dfs-meta.dfs.svc.cluster.local:8000  follower
+dfs-meta-1  dfs-meta-1.dfs-meta.dfs.svc.cluster.local:7000  dfs-meta-1.dfs-meta.dfs.svc.cluster.local:8000  follower
+dfs-meta-2  dfs-meta-2.dfs-meta.dfs.svc.cluster.local:7000  dfs-meta-2.dfs-meta.dfs.svc.cluster.local:8000  leader
+ring epoch 6: 6 storage nodes, 6 up
+=== 04:51:39 smoke on 6 storage pods
+job.batch/dfs-smoke condition met
+leader dfs-meta-2, term 2, ring epoch 6 with 6 storage nodes
+OK: 40 files (320 MiB) written and read back by 8 clients in 1.483s (452.4 MB/s round trip, upload+download bytes)
+=== 04:51:44 scale storage to 50 pods
+statefulset.apps/dfs-storage scaled
+ring epoch 50: 50 storage nodes, 50 up
+     17 dfs-worker
+     16 dfs-worker2
+     17 dfs-worker3
+=== 04:53:27 throughput job on 50 storage pods
+job.batch/dfs-throughput condition met
+using the running cluster at dfs-meta-0.dfs-meta.dfs.svc.cluster.local:8000,dfs-meta-1.dfs-meta.dfs.svc.cluster.local:8000,dfs-meta-2.dfs-meta.dfs.svc.cluster.local:8000; waiting for 50 storage nodes ...
+  ring: 50 storage nodes up
+upload: 96 files x 16MiB from 32 clients
+upload: 408.1 MB/s (389.2 MiB/s) over 3.946s, 0 errors, per-file p50 995 ms p99 3001 ms
+s3 write-behind drained 458ms after upload finished (449 chunk objects)
+download: random files for 30s from 32 clients
+download: 1472.1 MB/s (1403.9 MiB/s) over 30.157s, 2646 files, 0 errors, 0 checksum mismatches, per-file p50 349 ms p99 698 ms
+wrote /tmp/out/throughput.json
+=== 04:54:05 storage pod crash during traffic
+pod "dfs-storage-16" force deleted from dfs namespace
+force-deleted dfs-storage-16
+job.batch/dfs-smoke condition met
+leader dfs-meta-2, term 2, ring epoch 50 with 50 storage nodes
+OK: 40 files (320 MiB) written and read back by 8 clients in 1.003s (669.3 MB/s round trip, upload+download bytes)
+dfs-storage-16 back and Ready after 5.769056394 s (same identity and volume)
+ring epoch 50: 50 storage nodes, 50 up
+=== 04:54:19 Raft leader pod crash
+leader is dfs-meta-2; force-deleting it
+pod "dfs-meta-2" force deleted from dfs namespace
+new leader dfs-meta-0 seen after .170250979 s (includes kubectl exec round trips)
+leader: dfs-meta-0 (dfs-meta-0.dfs-meta.dfs.svc.cluster.local:8000)  term 3  commit 53
+MEMBER      RAFT                                            GRPC                                            ROLE
+dfs-meta-0  dfs-meta-0.dfs-meta.dfs.svc.cluster.local:7000  dfs-meta-0.dfs-meta.dfs.svc.cluster.local:8000  leader
+dfs-meta-1  dfs-meta-1.dfs-meta.dfs.svc.cluster.local:7000  dfs-meta-1.dfs-meta.dfs.svc.cluster.local:8000  follower
+dfs-meta-2  dfs-meta-2.dfs-meta.dfs.svc.cluster.local:7000  dfs-meta-2.dfs-meta.dfs.svc.cluster.local:8000  follower
+=== 04:54:20 done
