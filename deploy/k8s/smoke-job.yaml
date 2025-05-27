@@ -1,0 +1,21 @@
+# End-to-end check from inside the cluster: upload, download, compare.
+#   kubectl -n dfs apply -f deploy/k8s/smoke-job.yaml && kubectl -n dfs logs -f job/dfs-smoke
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: dfs-smoke
+  namespace: dfs
+spec:
+  backoffLimit: 3
+  template:
+    spec:
+      restartPolicy: OnFailure
+      containers:
+        - name: smoke
+          image: dfs:dev
+          imagePullPolicy: IfNotPresent
+          command: [/usr/local/bin/dfs-bench, k8s-smoke]
+          args:
+            - --meta=dfs-meta-0.dfs-meta.dfs.svc.cluster.local:8000,dfs-meta-1.dfs-meta.dfs.svc.cluster.local:8000,dfs-meta-2.dfs-meta.dfs.svc.cluster.local:8000
+            - --files=20
+            - --size=8MiB

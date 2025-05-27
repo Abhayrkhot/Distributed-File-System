@@ -1,0 +1,284 @@
+syntax = "proto3";
+
+package dfs.v1;
+
+option go_package = "github.com/Abhayrkhot/Distributed-File-System/gen/dfs/v1;dfsv1";
+
+// =====================================================================
+// Data plane: chunk service, one per storage node.
+//
+// Chunks are immutable and content-addressed: chunk_id is the lowercase
+// hex SHA-256 of the chunk bytes. A node verifies the hash before it makes
+// a chunk visible, so a replica is either the exact bytes or absent.
+// =====================================================================
+service ChunkService {
+  // Stream a chunk to this node. The first message carries the header;
+  // the rest carry data frames.
+  rpc PutChunk(stream PutChunkRequest) returns (PutChunkResponse);
+  // Stream a chunk from this node. With fallback=true the node fetches a
+  // missing chunk from peers or the S3 tier, keeps a copy, then serves it.
+  rpc GetChunk(GetChunkRequest) returns (stream GetChunkResponse);
+  // Batch presence check, used by the repair coordinator.
+  rpc HasChunks(HasChunksRequest) returns (HasChunksResponse);
+  // Pull a chunk from one of the sources (or S3) and store it locally.
+  rpc ReplicateChunk(ReplicateChunkRequest) returns (ReplicateChunkResponse);
+  // Upload a local chunk to the S3 tier now (synchronously).
+  rpc BackupChunk(BackupChunkRequest) returns (BackupChunkResponse);
+  rpc NodeStatus(NodeStatusRequest) returns (NodeStatusResponse);
+}
+
+message PutChunkHeader {
+  string chunk_id = 1;
+  int64 size = 2;
+  // Queue a write-behind copy to the S3 tier after the local write.
+  bool backup = 3;
+}
+
+message PutChunkRequest {
+  oneof msg {
+    PutChunkHeader header = 1;
+    bytes data = 2;
+  }
+}
+
+message PutChunkResponse {
+  bool already_present = 1;
+  int64 bytes_written = 2;
+}
+
+message GetChunkRequest {
+  string chunk_id = 1;
+  bool fallback = 2;
+}
+
+message GetChunkResponse {
+  // Set on the first message only.
+  int64 size = 1;
+  bytes data = 2;
+}
+
+message HasChunksRequest {
+  repeated string chunk_ids = 1;
+}
+
+message HasChunksResponse {
+  repeated bool present = 1;
+}
+
+message ReplicateChunkRequest {
+  string chunk_id = 1;
+  int64 size = 2;
+  // Peer chunk-service addresses to try, in order.
+  repeated string sources = 3;
+  // Fall back to the S3 tier when no peer can serve the chunk.
+  bool allow_s3 = 4;
+}
+
+message ReplicateChunkResponse {
+  // "local" (already present), "peer:<addr>" or "s3".
+  string source = 1;
+  int64 bytes = 2;
+}
+
+message BackupChunkRequest {
+  string chunk_id = 1;
+}
+
+message BackupChunkResponse {
+  bool already_backed_up = 1;
+}
+
+message NodeStatusRequest {}
+
+message NodeStatusResponse {
+  string node_id = 1;
+  string addr = 2;
+  int64 chunks = 3;
+  int64 bytes = 4;
+  uint64 ring_epoch = 5;
+  int64 backup_queue_depth = 6;
+  int64 backups_done = 7;
+  int64 backups_failed = 8;
+  int64 backups_inflight = 9;
+}
+
+// =====================================================================
+// File plane: served by every storage node. The node that receives a
+// request coordinates it (Dynamo style), so there is no single gateway.
+// =====================================================================
+service FileService {
+  rpc Upload(stream UploadRequest) returns (FileInfo);
+  rpc Download(DownloadRequest) returns (stream DownloadResponse);
+  rpc Stat(StatRequest) returns (FileInfo);
+  rpc List(ListRequest) returns (ListResponse);
+  rpc Delete(DeleteRequest) returns (DeleteResponse);
+}
+
+message UploadHeader {
+  string name = 1;
+}
+
+message UploadRequest {
+  oneof msg {
+    UploadHeader header = 1;
+    bytes data = 2;
+  }
+}
+
+message ChunkRef {
+  string id = 1;
+  int64 size = 2;
+}
+
+message FileInfo {
+  string name = 1;
+  string version = 2;
+  int64 size = 3;
+  string sha256 = 4;
+  int64 created_unix_ms = 5;
+  repeated ChunkRef chunks = 6;
+}
+
+message DownloadRequest {
+  string name = 1;
+  // Empty means latest.
+  string version = 2;
+}
+
+message DownloadResponse {
+  oneof msg {
+    FileInfo info = 1;
+    bytes data = 2;
+  }
+}
+
+message StatRequest {
+  string name = 1;
+  string version = 2;
+}
+
+message ListRequest {
+  string prefix = 1;
+  int32 limit = 2;
+}
+
+message ListResponse {
+  repeated FileInfo files = 1;
+}
+
+message DeleteRequest {
+  string name = 1;
+}
+
+message DeleteResponse {}
+
+// =====================================================================
+// Control plane: a small Raft group. The leader tracks storage-node
+// liveness from heartbeats, commits membership changes (each one bumps the
+// ring epoch), and runs replica repair. Writes sent to a follower fail with
+// FAILED_PRECONDITION and a "dfs-leader" trailer naming the leader.
+// =====================================================================
+service MetaService {
+  rpc Heartbeat(HeartbeatRequest) returns (HeartbeatResponse);
+  // Served by any member from its applied state.
+  rpc GetRing(GetRingRequest) returns (Ring);
+  // Sends the current ring, then every new epoch.
+  rpc WatchRing(WatchRingRequest) returns (stream Ring);
+  rpc Status(StatusRequest) returns (ClusterStatus);
+  // Commit a no-op through Raft. Used by health probes and the failover
+  // benchmark as the definition of "the control plane accepts writes".
+  rpc Propose(ProposeRequest) returns (ProposeResponse);
+  rpc TriggerRepair(TriggerRepairRequest) returns (RepairStatus);
+  rpc TransferLeadership(TransferLeadershipRequest) returns (TransferLeadershipResponse);
+}
+
+enum NodeState {
+  NODE_STATE_UNSPECIFIED = 0;
+  NODE_STATE_UP = 1;
+  NODE_STATE_DOWN = 2;
+}
+
+message StorageNode {
+  string id = 1;
+  string addr = 2;
+  NodeState state = 3;
+  int64 changed_unix_ms = 4;
+}
+
+message Ring {
+  uint64 epoch = 1;
+  repeated StorageNode nodes = 2;
+}
+
+message HeartbeatRequest {
+  string node_id = 1;
+  string addr = 2;
+  int64 chunks = 3;
+  int64 bytes = 4;
+  uint64 ring_epoch = 5;
+}
+
+message HeartbeatResponse {
+  uint64 ring_epoch = 1;
+}
+
+message GetRingRequest {}
+
+message WatchRingRequest {
+  // Only send rings newer than this epoch.
+  uint64 after_epoch = 1;
+}
+
+message StatusRequest {}
+
+message MetaPeer {
+  string id = 1;
+  string raft_addr = 2;
+  string grpc_addr = 3;
+  bool leader = 4;
+}
+
+message RepairStatus {
+  bool running = 1;
+  int64 runs = 2;
+  int64 last_started_unix_ms = 3;
+  int64 last_duration_ms = 4;
+  uint64 last_epoch = 5;
+  int64 chunks_scanned = 6;
+  int64 replicas_repaired = 7;
+  int64 restored_from_s3 = 8;
+  int64 backups_triggered = 9;
+  int64 under_replicated = 10;
+  int64 errors = 11;
+}
+
+message ClusterStatus {
+  string self_id = 1;
+  string leader_id = 2;
+  string leader_grpc_addr = 3;
+  uint64 term = 4;
+  uint64 commit_index = 5;
+  uint64 applied_index = 6;
+  repeated MetaPeer peers = 7;
+  Ring ring = 8;
+  RepairStatus repair = 9;
+  string raft_state = 10;
+}
+
+message ProposeRequest {}
+
+message ProposeResponse {
+  uint64 index = 1;
+  string leader_id = 2;
+}
+
+message TriggerRepairRequest {
+  // Wait for the run to finish before returning.
+  bool wait = 1;
+}
+
+message TransferLeadershipRequest {}
+
+message TransferLeadershipResponse {
+  string new_leader_id = 1;
+}

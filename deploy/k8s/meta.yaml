@@ -1,0 +1,92 @@
+# Raft control plane: three members with stable DNS names from a headless
+# Service. Raft peers are addressed by those names, so a rescheduled pod
+# with a new IP keeps its identity and its Raft state (PVC).
+apiVersion: v1
+kind: Service
+metadata:
+  name: dfs-meta
+  namespace: dfs
+spec:
+  clusterIP: None
+  # Peers must resolve each other before they are Ready (to elect a leader).
+  publishNotReadyAddresses: true
+  selector: {app: dfs-meta}
+  ports:
+    - {name: raft, port: 7000}
+    - {name: grpc, port: 8000}
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: dfs-meta
+  namespace: dfs
+spec:
+  maxUnavailable: 1
+  selector:
+    matchLabels: {app: dfs-meta}
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: dfs-meta
+  namespace: dfs
+spec:
+  serviceName: dfs-meta
+  replicas: 3
+  podManagementPolicy: Parallel
+  selector:
+    matchLabels: {app: dfs-meta}
+  template:
+    metadata:
+      labels: {app: dfs-meta}
+    spec:
+      terminationGracePeriodSeconds: 15 # SIGTERM hands leadership over first
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              podAffinityTerm:
+                topologyKey: kubernetes.io/hostname
+                labelSelector:
+                  matchLabels: {app: dfs-meta}
+      containers:
+        - name: meta
+          image: dfs:dev
+          imagePullPolicy: IfNotPresent
+          command: [/usr/local/bin/dfs-meta]
+          args:
+            - --id=$(POD_NAME)
+            - --raft-bind=0.0.0.0:7000
+            - --raft-advertise=$(POD_NAME).dfs-meta.dfs.svc.cluster.local:7000
+            - --grpc-bind=0.0.0.0:8000
+            - --grpc-advertise=$(POD_NAME).dfs-meta.dfs.svc.cluster.local:8000
+            - --bootstrap
+            - --data-dir=/data
+            - --timing=fast
+            - --dead-after=5s
+            - --cassandra=cassandra:9042
+            - --s3-endpoint=minio:9000
+          env:
+            - name: POD_NAME
+              valueFrom: {fieldRef: {fieldPath: metadata.name}}
+            - name: DFS_PEERS
+              value: >-
+                dfs-meta-0=dfs-meta-0.dfs-meta.dfs.svc.cluster.local:7000=dfs-meta-0.dfs-meta.dfs.svc.cluster.local:8000,dfs-meta-1=dfs-meta-1.dfs-meta.dfs.svc.cluster.local:7000=dfs-meta-1.dfs-meta.dfs.svc.cluster.local:8000,dfs-meta-2=dfs-meta-2.dfs-meta.dfs.svc.cluster.local:7000=dfs-meta-2.dfs-meta.dfs.svc.cluster.local:8000
+          envFrom:
+            - secretRef: {name: dfs-s3}
+          ports:
+            - {name: raft, containerPort: 7000}
+            - {name: grpc, containerPort: 8000}
+          readinessProbe:
+            tcpSocket: {port: 8000}
+            periodSeconds: 5
+          resources:
+            requests: {memory: 64Mi, cpu: 100m}
+            limits: {memory: 256Mi}
+          volumeMounts:
+            - {name: data, mountPath: /data}
+  volumeClaimTemplates:
+    - metadata: {name: data}
+      spec:
+        accessModes: [ReadWriteOnce]
+        resources: {requests: {storage: 1Gi}}

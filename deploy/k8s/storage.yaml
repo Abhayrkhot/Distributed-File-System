@@ -1,0 +1,87 @@
+# Storage nodes. Scale with: kubectl -n dfs scale statefulset dfs-storage --replicas=50
+# New pods register through heartbeats and join the ring; the leader's repair
+# pass moves replicas onto them.
+apiVersion: v1
+kind: Service
+metadata:
+  name: dfs-storage
+  namespace: dfs
+spec:
+  clusterIP: None
+  publishNotReadyAddresses: true
+  selector: {app: dfs-storage}
+  ports:
+    - {name: grpc, port: 9000}
+---
+# Client entry point: any storage node coordinates FileService requests.
+apiVersion: v1
+kind: Service
+metadata:
+  name: dfs
+  namespace: dfs
+spec:
+  selector: {app: dfs-storage}
+  ports:
+    - {name: grpc, port: 9000}
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: dfs-storage
+  namespace: dfs
+spec:
+  maxUnavailable: 1 # RF=3, W=2: one node down at a time keeps writes at quorum
+  selector:
+    matchLabels: {app: dfs-storage}
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: dfs-storage
+  namespace: dfs
+spec:
+  serviceName: dfs-storage
+  replicas: 6
+  podManagementPolicy: Parallel
+  selector:
+    matchLabels: {app: dfs-storage}
+  template:
+    metadata:
+      labels: {app: dfs-storage}
+    spec:
+      terminationGracePeriodSeconds: 10
+      containers:
+        - name: storage
+          image: dfs:dev
+          imagePullPolicy: IfNotPresent
+          command: [/usr/local/bin/dfs-storage]
+          args:
+            - --id=$(POD_NAME)
+            - --bind=0.0.0.0:9000
+            - --advertise=$(POD_NAME).dfs-storage.dfs.svc.cluster.local:9000
+            - --data-dir=/data
+            - --meta=dfs-meta-0.dfs-meta.dfs.svc.cluster.local:8000,dfs-meta-1.dfs-meta.dfs.svc.cluster.local:8000,dfs-meta-2.dfs-meta.dfs.svc.cluster.local:8000
+            - --cassandra=cassandra:9042
+            - --s3-endpoint=minio:9000
+          env:
+            - name: POD_NAME
+              valueFrom: {fieldRef: {fieldPath: metadata.name}}
+            - name: GOMEMLIMIT
+              value: 200MiB
+          envFrom:
+            - secretRef: {name: dfs-s3}
+          ports:
+            - {name: grpc, containerPort: 9000}
+          readinessProbe:
+            tcpSocket: {port: 9000}
+            periodSeconds: 5
+          resources:
+            requests: {memory: 64Mi, cpu: 100m}
+            limits: {memory: 256Mi}
+          volumeMounts:
+            - {name: data, mountPath: /data}
+  volumeClaimTemplates:
+    - metadata: {name: data}
+      spec:
+        accessModes: [ReadWriteOnce]
+        resources: {requests: {storage: 2Gi}}

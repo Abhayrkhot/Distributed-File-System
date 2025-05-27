@@ -1,0 +1,111 @@
+# Single-replica Cassandra and MinIO for a self-contained cluster. In
+# production, point --cassandra / --s3-endpoint at managed services instead.
+apiVersion: v1
+kind: Secret
+metadata:
+  name: dfs-s3
+  namespace: dfs
+type: Opaque
+stringData:
+  # Example values: replace before using anywhere real.
+  DFS_S3_ACCESS_KEY: dfsminio
+  DFS_S3_SECRET_KEY: dfsminio-secret
+  # 32-byte hex key for AES-256-GCM of chunks in S3 (openssl rand -hex 32).
+  DFS_S3_ENCRYPTION_KEY: "0000000000000000000000000000000000000000000000000000000000000000"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: cassandra
+  namespace: dfs
+spec:
+  clusterIP: None
+  selector: {app: cassandra}
+  ports:
+    - {name: cql, port: 9042}
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: cassandra
+  namespace: dfs
+spec:
+  serviceName: cassandra
+  replicas: 1
+  selector:
+    matchLabels: {app: cassandra}
+  template:
+    metadata:
+      labels: {app: cassandra}
+    spec:
+      containers:
+        - name: cassandra
+          image: cassandra:5.0
+          env:
+            - {name: MAX_HEAP_SIZE, value: 512M}
+            - {name: HEAP_NEWSIZE, value: 128M}
+            - {name: CASSANDRA_CLUSTER_NAME, value: dfs}
+          ports:
+            - {name: cql, containerPort: 9042}
+          readinessProbe:
+            tcpSocket: {port: 9042}
+            initialDelaySeconds: 20
+            periodSeconds: 5
+          resources:
+            requests: {memory: 1Gi, cpu: 250m}
+            limits: {memory: 1536Mi}
+          volumeMounts:
+            - {name: data, mountPath: /var/lib/cassandra}
+  volumeClaimTemplates:
+    - metadata: {name: data}
+      spec:
+        accessModes: [ReadWriteOnce]
+        resources: {requests: {storage: 2Gi}}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: minio
+  namespace: dfs
+spec:
+  selector: {app: minio}
+  ports:
+    - {name: s3, port: 9000}
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: minio
+  namespace: dfs
+spec:
+  serviceName: minio
+  replicas: 1
+  selector:
+    matchLabels: {app: minio}
+  template:
+    metadata:
+      labels: {app: minio}
+    spec:
+      containers:
+        - name: minio
+          image: minio/minio:RELEASE.2025-04-22T22-12-26Z
+          args: [server, /data, --address, ":9000"]
+          env:
+            - name: MINIO_ROOT_USER
+              valueFrom: {secretKeyRef: {name: dfs-s3, key: DFS_S3_ACCESS_KEY}}
+            - name: MINIO_ROOT_PASSWORD
+              valueFrom: {secretKeyRef: {name: dfs-s3, key: DFS_S3_SECRET_KEY}}
+          ports:
+            - {name: s3, containerPort: 9000}
+          readinessProbe:
+            httpGet: {path: /minio/health/ready, port: 9000}
+            periodSeconds: 5
+          resources:
+            requests: {memory: 256Mi, cpu: 100m}
+          volumeMounts:
+            - {name: data, mountPath: /data}
+  volumeClaimTemplates:
+    - metadata: {name: data}
+      spec:
+        accessModes: [ReadWriteOnce]
+        resources: {requests: {storage: 4Gi}}
