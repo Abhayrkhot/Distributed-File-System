@@ -227,6 +227,9 @@ chunk (restored from S3).
 - **Listing scans.** `List` uses `SELECT DISTINCT` over partition keys, and
   repair scans the whole catalogue. Fine at this project's scale; a sharded
   name index and incremental repair would replace them.
-- **Single-host benchmarks.** The 50+ node numbers come from 50 OS processes
-  on one machine over loopback. That exercises the protocols, concurrency and
-  failure handling, not network bandwidth (see [results.md](results.md)).
+- **One client in the benchmarks.** The 60-machine Slurm runs drive the
+  cluster from a single client machine, whose ~10 Gb/s link caps the
+  aggregate numbers (see [results.md](results.md)).
+- **One MinIO.** The S3 tier in the benchmarks is a single MinIO process, so
+  write-behind lags uploads by about a minute at 1 GB/s. Real S3 or a
+  distributed MinIO would remove that.

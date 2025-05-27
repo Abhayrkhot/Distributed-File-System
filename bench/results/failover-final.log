@@ -1,0 +1,34 @@
+starting 3 meta + 10 storage processes (timing=fast, store=wal, fast-detect=true, mode=crash)
+trial  1: meta-1 -> meta-0 in   184.3 ms
+trial  2: meta-0 -> meta-1 in   193.0 ms
+trial  3: meta-1 -> meta-0 in   193.8 ms
+trial  4: meta-0 -> meta-1 in   190.7 ms
+trial  5: meta-1 -> meta-2 in   192.5 ms
+trial  6: meta-2 -> meta-1 in   201.9 ms
+trial  7: meta-1 -> meta-2 in   154.8 ms
+trial  8: meta-2 -> meta-0 in   168.7 ms
+trial  9: meta-0 -> meta-2 in   140.0 ms
+trial 10: meta-2 -> meta-1 in   213.0 ms
+trial 11: meta-1 -> meta-2 in   205.1 ms
+trial 12: meta-2 -> meta-0 in   213.3 ms
+trial 13: meta-0 -> meta-2 in   204.2 ms
+trial 14: meta-2 -> meta-1 in   207.6 ms
+trial 15: meta-1 -> meta-0 in   256.0 ms
+trial 16: meta-0 -> meta-1 in   203.1 ms
+trial 17: meta-1 -> meta-0 in   131.8 ms
+trial 18: meta-0 -> meta-2 in   207.4 ms
+trial 19: meta-2 -> meta-1 in   203.7 ms
+trial 20: meta-1 -> meta-0 in   177.1 ms
+trial 21: meta-0 -> meta-2 in   143.9 ms
+trial 22: meta-2 -> meta-0 in   153.2 ms
+trial 23: meta-0 -> meta-2 in   186.7 ms
+trial 24: meta-2 -> meta-1 in   262.1 ms
+trial 25: meta-1 -> meta-0 in   196.3 ms
+trial 26: meta-0 -> meta-1 in   153.7 ms
+trial 27: meta-1 -> meta-2 in   227.9 ms
+trial 28: meta-2 -> meta-1 in   139.8 ms
+trial 29: meta-1 -> meta-2 in  1789.0 ms
+trial 30: meta-2 -> meta-0 in   156.4 ms
+
+recovery (ms): n=30 min=131.8 p50=193.0 p90=227.9 p99=1789.0 max=1789.0 mean=241.7  failed=0
+wrote bench/results/failover-crash-fast-wal-final.json

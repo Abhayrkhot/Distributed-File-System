@@ -23,14 +23,44 @@ def med(xs):
     return statistics.median(xs)
 
 
+# ---- Many machines (Slurm) ----
+hpc_root = os.path.join(os.path.dirname(root.rstrip("/")) or ".", "results-hpc")
+hpc = []
+for p in sorted(glob.glob(os.path.join(hpc_root, "throughput-hpc-*.json"))):
+    with open(p) as f:
+        hpc.append(json.load(f))
+if hpc:
+    print("### 60 machines (Explorer HPC, Slurm)\n")
+    print("| Run | Storage machines | Upload MB/s | Download MB/s (30 s) | Files moved | Errors | Checksum mismatches | Raft term | Ring epoch | Worst stall |")
+    print("|---|---|---|---|---|---|---|---|---|---|")
+    for i, d in enumerate(hpc, 1):
+        u, dl = d["upload"], d["download"]
+        stall = max((c.get("max_timer_late_ms", 0) for c in d.get("cpu_samples", [])), default=0)
+        print(f"| {i} | {d['storage_nodes']} | {u['mb_per_s']:.0f} | {dl['mb_per_s']:.0f} | {u['files'] + dl['files']} | "
+              f"{u['errors'] + dl['errors']} | {dl['checksum_mismatches']} | {d['raft_term_start']} → {d['raft_term_end']} | "
+              f"{d['ring_epoch_start']} → {d['ring_epoch_end']} | {stall:.0f} ms |")
+    ups = [d["upload"]["mb_per_s"] for d in hpc]
+    dns = [d["download"]["mb_per_s"] for d in hpc]
+    print(f"\nMedian upload {statistics.median(ups):.0f} MB/s, median download {statistics.median(dns):.0f} MB/s.\n")
+    for d in hpc:
+        r = d.get("repair")
+        if r:
+            print("**Repair (run with a SIGKILLed storage node):** "
+                  f"victim held {r['victim_chunks']} chunks ({r['victim_bytes'] >> 20} MiB); marked DOWN after {r['detect_ms']/1000:.2f} s; "
+                  f"repair pass {r['repair_pass_ms']:.0f} ms re-replicated {r['replicas_repaired']}; replication restored "
+                  f"{r['restored_ms']/1000:.2f} s after the kill; verify pass: {r['verify_under_replicated']} of {r['verify_chunks_scanned']} under-replicated; "
+                  f"{r['files_read_back_after_repair'] - r['read_errors_after_repair']}/{r['files_read_back_after_repair']} files read back OK.\n")
+
 tp = load("throughput-*nodes-r*.json")
 by_n = {}
 for name, d in tp:
     by_n.setdefault(d["storage_nodes"], []).append(d)
 
-print("### Throughput (median of runs, [min–max])\n")
-print("| Storage nodes | Runs | Upload MB/s | Download MB/s | Upload per-file p50 | Transfer errors | Checksum mismatches | S3 drain after upload |")
-print("|---|---|---|---|---|---|---|---|")
+if tp:
+    print("### Single host (median of runs, [min–max])\n")
+if tp:
+    print("| Storage nodes | Runs | Upload MB/s | Download MB/s | Upload per-file p50 | Transfer errors | Checksum mismatches | S3 drain after upload |")
+    print("|---|---|---|---|---|---|---|---|")
 for n in sorted(by_n):
     ds = by_n[n]
     up = [d["upload"]["mb_per_s"] for d in ds]
@@ -43,9 +73,10 @@ for n in sorted(by_n):
     print(f"| {n} | {len(ds)} | {med(up):.0f} [{min(up):.0f}–{max(up):.0f}] | {med(dn):.0f} [{min(dn):.0f}–{max(dn):.0f}] | "
           f"{med(p50):.1f} s | {errs} of {files} files | {mism} | {med(drain):.1f} s |")
 
-print("\n### Repair after a storage-node SIGKILL (median of runs)\n")
-print("| Storage nodes | Victim held | Marked DOWN after | Repair pass | Replication restored after kill | Verify pass under-replicated | Reads after repair |")
-print("|---|---|---|---|---|---|---|")
+if tp:
+    print("\n### Single-host repair after a storage-node SIGKILL (median of runs)\n")
+    print("| Storage nodes | Victim held | Marked DOWN after | Repair pass | Replication restored after kill | Verify pass under-replicated | Reads after repair |")
+    print("|---|---|---|---|---|---|---|")
 for n in sorted(by_n):
     rs = [d["repair"] for d in by_n[n] if d.get("repair")]
     if not rs:
@@ -55,9 +86,10 @@ for n in sorted(by_n):
           f"{max(r['verify_under_replicated'] for r in rs)} (all runs) | "
           f"{sum(r['files_read_back_after_repair'] - r['read_errors_after_repair'] for r in rs)}/{sum(r['files_read_back_after_repair'] for r in rs)} OK |")
 
-print("\n### Control-plane stability under load\n")
-print("| Storage nodes | Run | Raft term start → end | Ring epoch start → end | Worst scheduling stall |")
-print("|---|---|---|---|---|")
+if tp:
+    print("\n### Single-host control-plane stability under load\n")
+    print("| Storage nodes | Run | Raft term start → end | Ring epoch start → end | Worst scheduling stall |")
+    print("|---|---|---|---|---|")
 for n in sorted(by_n):
     for i, d in enumerate(by_n[n], 1):
         stall = max((c.get("max_timer_late_ms", 0) for c in d.get("cpu_samples", [])), default=0)

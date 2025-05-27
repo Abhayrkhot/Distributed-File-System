@@ -9,7 +9,22 @@ talks gRPC, and it deploys to Kubernetes.
 
 **Go · gRPC · Raft (hashicorp/raft) · Cassandra · S3 (MinIO/AWS) · Kubernetes**
 
-<!-- RESULTS -->
+## Results
+
+Measured on **64 separate machines** of a Slurm HPC cluster (60 storage
+nodes, 3 Raft members, 1 Cassandra + MinIO), and on one Linux host for Raft
+failover. Details and caveats are in [docs/results.md](docs/results.md).
+
+| | |
+|---|---|
+| Aggregate throughput, 60 storage machines | **1,129 MB/s upload, 1,227 MB/s download** (median of 3 runs); every byte replicated 3× plus an S3 copy, and every download SHA-256-verified |
+| Correctness under load | 7,286 files moved, 0 errors, 0 checksum mismatches |
+| Storage-node crash | marked DOWN in 4.8 s; 113 chunks re-replicated in a 0.94 s pass; 0 of 2,304 chunks under-replicated afterwards |
+| Raft leader crash → writes again | **193 ms** median (p90 228 ms) over 30 SIGKILLs, against 2.1 s with hashicorp/raft defaults; 5 ms for a planned handover |
+| Control-plane stability | 0 leader elections and 0 false node evictions during the 60-machine runs |
+
+The aggregate rate is bounded by the single client machine's ~10 Gb/s
+link, not by the cluster.
 
 ## How it works
 
@@ -122,13 +137,27 @@ integration tests cover:
 
 ## Benchmarks
 
+Across many machines on a Slurm cluster, one role per machine
+(`deploy/slurm/`; partitions that cap jobs at 2 nodes are handled by
+submitting many 2-node jobs):
+
+```bash
+ACCOUNT=<your-account> deploy/slurm/launch.sh 60
+```
+
+```bash
+deploy/slurm/bench.sh 60 3
+```
+
+On one host (Raft failover matrix, plus a process-per-node throughput run):
+
 ```bash
 scripts/run-benchmarks.sh
 ```
 
-Reproduces every number in [docs/results.md](docs/results.md): throughput and
-repair on 50 and 64 storage processes, and a Raft failover matrix with 30
-trials per configuration. The JSON results are in `bench/results/`.
+The JSON results are in `bench/results-hpc/` and `bench/results/`, and
+`scripts/results-table.py` renders the tables in
+[docs/results.md](docs/results.md).
 
 ## Kubernetes
 

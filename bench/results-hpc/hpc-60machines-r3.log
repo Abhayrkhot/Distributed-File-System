@@ -1,0 +1,27 @@
+using the running cluster at 10.99.101.100:47534,10.99.252.105:56638,10.99.252.106:54952; waiting for 60 storage nodes ...
+  ring: 60 storage nodes up
+upload: 192 files x 16MiB from 64 clients
+upload: 1099.9 MB/s (1048.9 MiB/s) over 2.929s, 0 errors, per-file p50 719 ms p99 2519 ms
+  cpu@  5s: timer-late max   9.3ms  storage 0%  meta 3%  bench 345%  cassandra 0%  minio 0%  spotlight 0%  docker-vm 0%  other 946%
+  cpu@ 10s: timer-late max   1.0ms  storage 0%  meta 3%  bench 177%  cassandra 0%  minio 0%  spotlight 0%  docker-vm 0%  other 945%
+  cpu@ 15s: timer-late max   1.1ms  storage 0%  meta 3%  bench 122%  cassandra 0%  minio 0%  spotlight 0%  docker-vm 0%  other 945%
+  cpu@ 20s: timer-late max   1.0ms  storage 0%  meta 3%  bench 94%  cassandra 0%  minio 0%  spotlight 0%  docker-vm 0%  other 945%
+  cpu@ 25s: timer-late max   1.1ms  storage 0%  meta 3%  bench 77%  cassandra 0%  minio 0%  spotlight 0%  docker-vm 0%  other 945%
+  cpu@ 30s: timer-late max   1.1ms  storage 0%  meta 3%  bench 66%  cassandra 0%  minio 0%  spotlight 0%  docker-vm 0%  other 945%
+  cpu@ 35s: timer-late max   1.0ms  storage 0%  meta 3%  bench 58%  cassandra 0%  minio 0%  spotlight 0%  docker-vm 0%  other 944%
+  cpu@ 40s: timer-late max   1.0ms  storage 0%  meta 3%  bench 52%  cassandra 0%  minio 0%  spotlight 0%  docker-vm 0%  other 944%
+  cpu@ 45s: timer-late max   1.0ms  storage 0%  meta 3%  bench 47%  cassandra 0%  minio 0%  spotlight 0%  docker-vm 0%  other 945%
+  cpu@ 50s: timer-late max   1.1ms  storage 0%  meta 3%  bench 44%  cassandra 0%  minio 0%  spotlight 0%  docker-vm 0%  other 945%
+  cpu@ 55s: timer-late max   1.1ms  storage 0%  meta 3%  bench 41%  cassandra 0%  minio 0%  spotlight 0%  docker-vm 0%  other 945%
+  cpu@ 60s: timer-late max   1.1ms  storage 0%  meta 3%  bench 38%  cassandra 0%  minio 0%  spotlight 0%  docker-vm 0%  other 945%
+s3 write-behind drained 1m0.234s after upload finished (2304 chunk objects)
+download: random files for 30s from 64 clients
+  cpu@ 65s: timer-late max   1.1ms  storage 0%  meta 3%  bench 56%  cassandra 0%  minio 0%  spotlight 0%  docker-vm 0%  other 944%
+  cpu@ 70s: timer-late max  18.1ms  storage 0%  meta 3%  bench 101%  cassandra 0%  minio 0%  spotlight 0%  docker-vm 0%  other 944%
+  cpu@ 75s: timer-late max   6.3ms  storage 0%  meta 3%  bench 140%  cassandra 0%  minio 0%  spotlight 0%  docker-vm 0%  other 944%
+  cpu@ 80s: timer-late max   4.3ms  storage 0%  meta 3%  bench 174%  cassandra 0%  minio 0%  spotlight 0%  docker-vm 0%  other 944%
+  cpu@ 85s: timer-late max   6.0ms  storage 0%  meta 3%  bench 204%  cassandra 0%  minio 0%  spotlight 0%  docker-vm 0%  other 944%
+  cpu@ 90s: timer-late max   1.9ms  storage 0%  meta 3%  bench 229%  cassandra 0%  minio 0%  spotlight 0%  docker-vm 0%  other 945%
+download: 1224.8 MB/s (1168.1 MiB/s) over 30.587s, 2233 files, 0 errors, 0 checksum mismatches, per-file p50 439 ms p99 17148 ms
+repair: node-30 (113 chunks, 452 MiB) DOWN after 4826 ms; pass of 941 ms re-replicated 113 chunks; RF restored 6245 ms after the kill; verify pass: 0 under-replicated of 2304
+wrote /scratch/$USER/dfs/results/throughput-hpc-60machines-r3.json
