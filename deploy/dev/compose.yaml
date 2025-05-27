@@ -1,0 +1,26 @@
+# Cassandra + MinIO for local development on Linux (scripts/dev-deps.sh uses
+# this when Homebrew is not available). Published host ports match the native
+# setup, so tests and benchmarks read the same DFS_* environment.
+name: dfs-dev
+services:
+  cassandra:
+    image: cassandra:5.0
+    ports: ["127.0.0.1:${CASS_PORT:-19042}:9042"]
+    environment:
+      MAX_HEAP_SIZE: ${CASS_HEAP:-1G}
+      HEAP_NEWSIZE: 256M
+    volumes: ["cassandra-data:/var/lib/cassandra"]
+  minio:
+    # minio/minio is no longer published on Docker Hub.
+    image: cgr.dev/chainguard/minio:latest
+    ports:
+      - "127.0.0.1:${MINIO_PORT:-19000}:9000"
+      - "127.0.0.1:${MINIO_CONSOLE_PORT:-19001}:9001"
+    command: server --quiet --address :9000 --console-address :9001 /data
+    environment:
+      MINIO_ROOT_USER: ${MINIO_USER:-dfsminio}
+      MINIO_ROOT_PASSWORD: ${MINIO_PASS:-dfsminio-secret}
+    volumes: ["minio-data:/data"]
+volumes:
+  cassandra-data:
+  minio-data:

@@ -107,6 +107,32 @@ export DFS_S3_BUCKET=$BUCKET
 EOF
 }
 
+# Linux (no Homebrew): run both backends in Docker with the same host ports.
+if ! command -v brew >/dev/null 2>&1 && command -v docker >/dev/null 2>&1; then
+  COMPOSE=(docker compose -f "$ROOT/deploy/dev/compose.yaml")
+  export CASS_PORT CASS_STORAGE_PORT CASS_JMX_PORT CASS_HEAP MINIO_PORT MINIO_CONSOLE_PORT MINIO_USER MINIO_PASS
+  cassandra_up() {
+    "${COMPOSE[@]}" up -d cassandra
+    for _ in $(seq 1 240); do
+      if nc -z 127.0.0.1 "$CASS_PORT" 2>/dev/null; then echo "cassandra: ready on 127.0.0.1:$CASS_PORT"; return; fi
+      sleep 1
+    done
+    echo "cassandra: did not start; docker compose logs cassandra" >&2; return 1
+  }
+  minio_up() {
+    "${COMPOSE[@]}" up -d minio
+    for _ in $(seq 1 60); do
+      if nc -z 127.0.0.1 "$MINIO_PORT" 2>/dev/null; then echo "minio: ready on 127.0.0.1:$MINIO_PORT"; return; fi
+      sleep 0.5
+    done
+    echo "minio: did not start" >&2; return 1
+  }
+  case "${1:-}" in
+    down) "${COMPOSE[@]}" stop; exit 0 ;;
+    wipe) "${COMPOSE[@]}" down -v; rm -rf "$LOCAL"; echo "removed docker volumes"; exit 0 ;;
+  esac
+fi
+
 case "${1:-}" in
   up) minio_up; cassandra_up; print_env ;;
   down) stop_pidfile minio "$LOCAL/minio/pid"; stop_pidfile cassandra "$LOCAL/cassandra/pid" ;;
