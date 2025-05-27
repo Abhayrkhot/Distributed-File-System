@@ -16,26 +16,52 @@ def load(pattern):
     return out
 
 
-print("### Throughput\n")
-print("| Storage nodes | Upload MB/s | Download MB/s | Upload p50 / p99 per 16 MiB file | Errors | Checksum mismatches | Raft term change | S3 drain after upload |")
-print("|---|---|---|---|---|---|---|---|")
-for name, d in load("throughput-*.json"):
-    u, dl = d["upload"], d["download"]
-    print(f"| {d['storage_nodes']} | {u['mb_per_s']:.0f} | {dl['mb_per_s']:.0f} | "
-          f"{u['per_file_latency_ms']['p50']/1000:.1f} s / {u['per_file_latency_ms']['p99']/1000:.1f} s | "
-          f"{u['errors'] + dl['errors']} | {dl['checksum_mismatches']} | "
-          f"{d['raft_term_start']} → {d['raft_term_end']} | {d['s3_writebehind_drain_ms']/1000:.1f} s |")
+import statistics
 
-print("\n### Repair after a storage-node SIGKILL\n")
+
+def med(xs):
+    return statistics.median(xs)
+
+
+tp = load("throughput-*nodes-r*.json")
+by_n = {}
+for name, d in tp:
+    by_n.setdefault(d["storage_nodes"], []).append(d)
+
+print("### Throughput (median of runs, [min–max])\n")
+print("| Storage nodes | Runs | Upload MB/s | Download MB/s | Upload per-file p50 | Transfer errors | Checksum mismatches | S3 drain after upload |")
+print("|---|---|---|---|---|---|---|---|")
+for n in sorted(by_n):
+    ds = by_n[n]
+    up = [d["upload"]["mb_per_s"] for d in ds]
+    dn = [d["download"]["mb_per_s"] for d in ds]
+    p50 = [d["upload"]["per_file_latency_ms"]["p50"] / 1000 for d in ds]
+    errs = sum(d["upload"]["errors"] + d["download"]["errors"] for d in ds)
+    mism = sum(d["download"]["checksum_mismatches"] for d in ds)
+    drain = [d["s3_writebehind_drain_ms"] / 1000 for d in ds]
+    files = sum(d["upload"]["files"] + d["download"]["files"] for d in ds)
+    print(f"| {n} | {len(ds)} | {med(up):.0f} [{min(up):.0f}–{max(up):.0f}] | {med(dn):.0f} [{min(dn):.0f}–{max(dn):.0f}] | "
+          f"{med(p50):.1f} s | {errs} of {files} files | {mism} | {med(drain):.1f} s |")
+
+print("\n### Repair after a storage-node SIGKILL (median of runs)\n")
 print("| Storage nodes | Victim held | Marked DOWN after | Repair pass | Replication restored after kill | Verify pass under-replicated | Reads after repair |")
 print("|---|---|---|---|---|---|---|")
-for name, d in load("throughput-*.json"):
-    r = d.get("repair")
-    if not r:
+for n in sorted(by_n):
+    rs = [d["repair"] for d in by_n[n] if d.get("repair")]
+    if not rs:
         continue
-    print(f"| {d['storage_nodes']} | {r['victim_chunks']} chunks ({r['victim_bytes'] >> 20} MiB) | {r['detect_ms']/1000:.2f} s | "
-          f"{r['repair_pass_ms']:.0f} ms | {r['restored_ms']/1000:.2f} s | {r['verify_under_replicated']} of {r['verify_chunks_scanned']} | "
-          f"{r['files_read_back_after_repair'] - r['read_errors_after_repair']}/{r['files_read_back_after_repair']} OK |")
+    print(f"| {n} | {med([r['victim_chunks'] for r in rs]):.0f} chunks | {med([r['detect_ms'] for r in rs])/1000:.2f} s | "
+          f"{med([r['repair_pass_ms'] for r in rs]):.0f} ms | {med([r['restored_ms'] for r in rs])/1000:.2f} s | "
+          f"{max(r['verify_under_replicated'] for r in rs)} (all runs) | "
+          f"{sum(r['files_read_back_after_repair'] - r['read_errors_after_repair'] for r in rs)}/{sum(r['files_read_back_after_repair'] for r in rs)} OK |")
+
+print("\n### Control-plane stability under load\n")
+print("| Storage nodes | Run | Raft term start → end | Ring epoch start → end | Worst scheduling stall |")
+print("|---|---|---|---|---|")
+for n in sorted(by_n):
+    for i, d in enumerate(by_n[n], 1):
+        stall = max((c.get("max_timer_late_ms", 0) for c in d.get("cpu_samples", [])), default=0)
+        print(f"| {n} | {i} | {d['raft_term_start']} → {d['raft_term_end']} | {d['ring_epoch_start']} → {d['ring_epoch_end']} | {stall:.0f} ms |")
 
 print("\n### Raft leader recovery (30 trials each)\n")
 print("| Configuration | Failure | p50 | p90 | max | mean |")

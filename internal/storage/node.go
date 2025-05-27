@@ -346,8 +346,12 @@ func (n *Node) PutChunk(stream dfsv1.ChunkService_PutChunkServer) error {
 	if h == nil {
 		return status.Error(codes.InvalidArgument, "first message must be a header")
 	}
+	start := time.Now()
+	var recvWait time.Duration
 	r := &streamReader{recv: func() ([]byte, error) {
+		t := time.Now()
 		m, err := stream.Recv()
+		recvWait += time.Since(t)
 		if err != nil {
 			return nil, err
 		}
@@ -359,6 +363,10 @@ func (n *Node) PutChunk(stream dfsv1.ChunkService_PutChunkServer) error {
 	}
 	if h.Backup {
 		n.enqueueBackup(h.ChunkId)
+	}
+	if el := time.Since(start); el > time.Second {
+		n.log.Warn("slow chunk receive", "chunk", h.ChunkId[:12], "total", el.Round(time.Millisecond),
+			"waiting_on_stream", recvWait.Round(time.Millisecond), "store_and_hash", (el - recvWait).Round(time.Millisecond))
 	}
 	return stream.SendAndClose(&dfsv1.PutChunkResponse{AlreadyPresent: already, BytesWritten: written})
 }

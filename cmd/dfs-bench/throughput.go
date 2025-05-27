@@ -140,7 +140,8 @@ func runThroughput(args []string) error {
 	procs := fs.Int("gomaxprocs", 2, "GOMAXPROCS for each dfs-meta/dfs-storage process (0: Go default, all cores). "+
 		"53 processes each defaulting to every core spend their CPU in scheduler spinning; 2 is what Go picks for a pod with a 2-CPU limit")
 	extraMeta := fs.String("meta-args", "", "extra dfs-meta flags, space separated")
-	backupWorkers := fs.Int("backup-workers", 4, "S3 write-behind workers per storage node")
+	backupWorkers := fs.Int("backup-workers", 1, "S3 write-behind workers per storage node. "+
+		"1 here because MinIO shares the host's SSD with the replicas; a real S3 endpoint is network-bound and wants more (the node default is 4)")
 	raftLog := fs.String("raft-log-level", "warn", "dfs-meta raft log level")
 	fs.Parse(args)
 
