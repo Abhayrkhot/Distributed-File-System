@@ -143,6 +143,10 @@ func runThroughput(args []string) error {
 	backupWorkers := fs.Int("backup-workers", 1, "S3 write-behind workers per storage node. "+
 		"1 here because MinIO shares the host's SSD with the replicas; a real S3 endpoint is network-bound and wants more (the node default is 4)")
 	raftLog := fs.String("raft-log-level", "warn", "dfs-meta raft log level")
+	existing := fs.String("cluster", "", "use an already-running cluster: comma-separated dfs-meta gRPC addresses (nothing is launched)")
+	killCmd := fs.String("kill-cmd", "", "with --cluster: shell command that crashes a storage node; {id} and {addr} are substituted")
+	waitJoin := fs.Duration("wait", 15*time.Minute, "with --cluster: how long to wait for --storage nodes to join the ring")
+	hostDesc := fs.String("host-desc", "", "override the host description recorded in the result")
 	fs.Parse(args)
 
 	fileSize, err := parseSize(*fileSizeS)
@@ -157,74 +161,43 @@ func runThroughput(args []string) error {
 	if err != nil {
 		return err
 	}
-	cassHosts := os.Getenv("DFS_CASSANDRA")
-	if cassHosts == "" {
-		return fmt.Errorf("DFS_CASSANDRA must point at Cassandra (scripts/dev-deps.sh up); the processes share one metastore")
-	}
 	ctx := context.Background()
 	stamp := time.Now().Unix()
-	keyspace := fmt.Sprintf("dfs_bench_%d", stamp)
-	bucket := fmt.Sprintf("dfs-bench-%d", stamp)
-	encKey := make([]byte, 32)
-	rand.Read(encKey)
-
-	// Create the schema once, before 50 processes race to do it.
-	cs, err := metastore.NewCassandra(ctx, metastore.CassandraConfig{Hosts: strings.Split(cassHosts, ","), Keyspace: keyspace})
-	if err != nil {
-		return err
-	}
-	defer func() { cs.DropKeyspace(context.Background()); cs.Close() }()
-
 	res := ThroughputResult{GOMAXPROCS: *procs, MetaArgs: *extraMeta, BackupWorkers: *backupWorkers, Env: hostEnv(), MetaNodes: *metaN, StorageNodes: *storageN, Clients: *clients, FileSize: fileSize,
-		ChunkSize: chunk, Replicas: 3, WriteQuorum: 2, Fsync: *fsync, Metastore: "cassandra " + cassHosts}
-	env := []string{"DFS_KEYSPACE=" + keyspace, "DFS_S3_BUCKET=" + bucket, "DFS_S3_ENCRYPTION_KEY=" + hex.EncodeToString(encKey)}
-	if *procs > 0 {
-		env = append(env, fmt.Sprintf("GOMAXPROCS=%d", *procs))
+		ChunkSize: chunk, Replicas: 3, WriteQuorum: 2, Fsync: *fsync}
+	if *hostDesc != "" {
+		res.Env.Host = *hostDesc
 	}
-	var s3 *blob.S3
-	if cfg, ok := blob.S3ConfigFromEnv(); ok {
-		cfg.Bucket, cfg.CreateBucket = bucket, true
-		if s3, err = blob.NewS3(ctx, cfg); err != nil {
+	var (
+		bc benchCluster
+		s3 *blob.S3
+	)
+	if *existing != "" {
+		fmt.Printf("using the running cluster at %s; waiting for %d storage nodes ...\n", *existing, *storageN)
+		eb, err := newExternalBench(ctx, strings.Split(*existing, ","), *killCmd, *storageN, *waitJoin)
+		if err != nil {
 			return err
 		}
-		res.ColdTier = "s3 (MinIO) " + cfg.Endpoint + ", AES-256-GCM"
+		bc = eb
+		res.StorageNodes, res.GOMAXPROCS, res.BackupWorkers = len(eb.nodes), 0, 0
+		res.Metastore, res.ColdTier = "the running cluster's", "the running cluster's"
 	} else {
-		res.ColdTier = "none (DFS_S3_ENDPOINT unset)"
+		lb, cleanup, err := startLocal(ctx, &res, localOpts{bin: *bin, metaN: *metaN, storageN: *storageN, procs: *procs, extraMeta: *extraMeta,
+			backupWorkers: *backupWorkers, raftLog: *raftLog, chunk: chunk, fsync: *fsync, keep: *keep, stamp: stamp})
+		if err != nil {
+			return err
+		}
+		defer cleanup()
+		bc, s3 = lb, lb.s3
 	}
-
-	dir, err := os.MkdirTemp("", "dfs-throughput-*.noindex") // .noindex: skipped by Spotlight
-	if err != nil {
-		return err
-	}
-	if *keep {
-		fmt.Println("keeping", dir)
-	} else {
-		defer os.RemoveAll(dir)
-	}
-	storageArgs := []string{"--log-level", "warn", "--chunk-size", fmt.Sprint(chunk), "--backup-workers", fmt.Sprint(*backupWorkers)}
-	if *fsync {
-		storageArgs = append(storageArgs, "--fsync")
-	}
-	fmt.Printf("starting %d meta + %d storage processes ...\n", *metaN, *storageN)
-	start := time.Now()
-	c, err := localcluster.Start(ctx, localcluster.Options{
-		BinDir: *bin, Dir: dir, Meta: *metaN, Storage: *storageN, Env: env,
-		MetaArgs: append([]string{"--timing", "fast", "--dead-after", "3s", "--repair-interval", "1h", "--log-level", "info", "--raft-log-level", *raftLog},
-			strings.Fields(*extraMeta)...),
-		StorageArgs: storageArgs,
-	})
-	if err != nil {
-		return err
-	}
-	defer c.Stop()
-	fmt.Printf("cluster up in %v\n", time.Since(start).Round(time.Millisecond))
+	defer bc.Stop()
 	var addrs []string
-	for _, n := range c.Nodes {
+	for _, n := range bc.Nodes() {
 		addrs = append(addrs, n.Addr)
 	}
 	cl := client.New(addrs)
 	defer cl.Close()
-	mc := meta.NewClient(c.MetaAddrs, nil)
+	mc := meta.NewClient(bc.MetaAddrs(), nil)
 	defer mc.Close()
 
 	if st, err := mc.LeaderStatus(ctx); err == nil {
@@ -300,8 +273,8 @@ func runThroughput(args []string) error {
 	pool := rpcutil.NewPool()
 	defer pool.Close()
 	nodeStatus := func() (queue, done int64) {
-		for _, n := range c.Nodes {
-			if !n.Running() {
+		for _, n := range bc.Nodes() {
+			if !bc.Alive(n.Name) {
 				continue
 			}
 			conn, err := pool.Get(n.Addr)
@@ -318,7 +291,7 @@ func runThroughput(args []string) error {
 		}
 		return
 	}
-	if s3 != nil {
+	if s3 != nil || *existing != "" {
 		d0 := time.Now()
 		zeros := 0
 		for {
@@ -343,11 +316,7 @@ func runThroughput(args []string) error {
 			time.Duration(res.S3DrainMs*float64(time.Millisecond)).Round(time.Millisecond), res.S3BackupsDone)
 	}
 
-	var rss int64
-	for _, n := range c.Nodes {
-		rss += n.RSS()
-	}
-	res.StorageRSSMiB = float64(rss) / 1024
+	res.StorageRSSMiB = float64(bc.RSSKiB()) / 1024
 
 	// ---- download ----
 	var good []file
@@ -401,7 +370,7 @@ func runThroughput(args []string) error {
 
 	// ---- repair after a storage-node crash ----
 	if *doRepair {
-		rr, err := measureRepair(ctx, c, mc, pool, cl, good)
+		rr, err := measureRepair(ctx, bc, mc, pool, cl, good)
 		if err != nil {
 			res.Notes = append(res.Notes, "repair phase: "+err.Error())
 			fmt.Println("repair phase failed:", err)
@@ -424,12 +393,6 @@ func runThroughput(args []string) error {
 		return err
 	}
 	fmt.Println("wrote", p)
-
-	if s3 != nil {
-		cctx, cancel := context.WithTimeout(ctx, 5*time.Minute)
-		s3.RemoveAll(cctx)
-		cancel()
-	}
 	return nil
 }
 
@@ -444,8 +407,9 @@ type benchFile struct {
 	sha  string
 }
 
-func measureRepair(ctx context.Context, c *localcluster.Cluster, mc *meta.Client, pool *rpcutil.Pool, cl *client.Client, files []benchFile) (*RepairResult, error) {
-	victim := c.Nodes[len(c.Nodes)/2]
+func measureRepair(ctx context.Context, bc benchCluster, mc *meta.Client, pool *rpcutil.Pool, cl *client.Client, files []benchFile) (*RepairResult, error) {
+	nodes := bc.Nodes()
+	victim := nodes[len(nodes)/2]
 	conn, err := pool.Get(victim.Addr)
 	if err != nil {
 		return nil, err
@@ -462,7 +426,7 @@ func measureRepair(ctx context.Context, c *localcluster.Cluster, mc *meta.Client
 	runsBefore := before.Repair.Runs
 
 	t0 := time.Now()
-	if err := victim.Kill(); err != nil {
+	if err := bc.Kill(ctx, victim.Name); err != nil {
 		return nil, err
 	}
 	// Detection: the victim leaves the ring.
@@ -504,8 +468,8 @@ func measureRepair(ctx context.Context, c *localcluster.Cluster, mc *meta.Client
 	rr.VerifyUnderRepl, rr.VerifyScanned = v.UnderReplicated, v.ChunksScanned
 	// Read a sample back with the victim gone.
 	var live []string
-	for _, n := range c.Nodes {
-		if n.Running() {
+	for _, n := range bc.Nodes() {
+		if bc.Alive(n.Name) {
 			live = append(live, n.Addr)
 		}
 	}
@@ -602,4 +566,97 @@ func sampleCPU(out *[]CPUSample, every time.Duration) func() {
 		}
 	}()
 	return func() { close(done); <-finished }
+}
+
+type localOpts struct {
+	bin                    string
+	metaN, storageN, procs int
+	extraMeta, raftLog     string
+	backupWorkers          int
+	chunk                  int64
+	fsync, keep            bool
+	stamp                  int64
+}
+
+type localBenchWithS3 struct {
+	localBench
+	s3 *blob.S3
+}
+
+// startLocal launches dfs-meta and dfs-storage processes on this host with
+// a fresh Cassandra keyspace and S3 bucket. cleanup drops both.
+func startLocal(ctx context.Context, res *ThroughputResult, o localOpts) (*localBenchWithS3, func(), error) {
+	cassHosts := os.Getenv("DFS_CASSANDRA")
+	if cassHosts == "" {
+		return nil, nil, fmt.Errorf("DFS_CASSANDRA must point at Cassandra (scripts/dev-deps.sh up); the processes share one metastore")
+	}
+	keyspace := fmt.Sprintf("dfs_bench_%d", o.stamp)
+	bucket := fmt.Sprintf("dfs-bench-%d", o.stamp)
+	encKey := make([]byte, 32)
+	rand.Read(encKey)
+	res.Metastore = "cassandra " + cassHosts
+
+	// Create the schema once, before 50 processes race to do it.
+	cs, err := metastore.NewCassandra(ctx, metastore.CassandraConfig{Hosts: strings.Split(cassHosts, ","), Keyspace: keyspace})
+	if err != nil {
+		return nil, nil, err
+	}
+	var cleanups []func()
+	cleanup := func() {
+		for i := len(cleanups) - 1; i >= 0; i-- {
+			cleanups[i]()
+		}
+	}
+	cleanups = append(cleanups, func() { cs.DropKeyspace(context.Background()); cs.Close() })
+
+	env := []string{"DFS_KEYSPACE=" + keyspace, "DFS_S3_BUCKET=" + bucket, "DFS_S3_ENCRYPTION_KEY=" + hex.EncodeToString(encKey)}
+	if o.procs > 0 {
+		env = append(env, fmt.Sprintf("GOMAXPROCS=%d", o.procs))
+	}
+	out := &localBenchWithS3{}
+	if cfg, ok := blob.S3ConfigFromEnv(); ok {
+		cfg.Bucket, cfg.CreateBucket = bucket, true
+		if out.s3, err = blob.NewS3(ctx, cfg); err != nil {
+			cleanup()
+			return nil, nil, err
+		}
+		res.ColdTier = "s3 (MinIO) " + cfg.Endpoint + ", AES-256-GCM"
+		cleanups = append(cleanups, func() {
+			cctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+			defer cancel()
+			out.s3.RemoveAll(cctx)
+		})
+	} else {
+		res.ColdTier = "none (DFS_S3_ENDPOINT unset)"
+	}
+
+	dir, err := os.MkdirTemp("", "dfs-throughput-*.noindex") // .noindex: skipped by Spotlight
+	if err != nil {
+		cleanup()
+		return nil, nil, err
+	}
+	if o.keep {
+		fmt.Println("keeping", dir)
+	} else {
+		cleanups = append(cleanups, func() { os.RemoveAll(dir) })
+	}
+	storageArgs := []string{"--log-level", "warn", "--chunk-size", fmt.Sprint(o.chunk), "--backup-workers", fmt.Sprint(o.backupWorkers)}
+	if o.fsync {
+		storageArgs = append(storageArgs, "--fsync")
+	}
+	fmt.Printf("starting %d meta + %d storage processes ...\n", o.metaN, o.storageN)
+	start := time.Now()
+	c, err := localcluster.Start(ctx, localcluster.Options{
+		BinDir: o.bin, Dir: dir, Meta: o.metaN, Storage: o.storageN, Env: env,
+		MetaArgs: append([]string{"--timing", "fast", "--dead-after", "3s", "--repair-interval", "1h", "--log-level", "info", "--raft-log-level", o.raftLog},
+			strings.Fields(o.extraMeta)...),
+		StorageArgs: storageArgs,
+	})
+	if err != nil {
+		cleanup()
+		return nil, nil, err
+	}
+	fmt.Printf("cluster up in %v\n", time.Since(start).Round(time.Millisecond))
+	out.localBench = localBench{c}
+	return out, cleanup, nil
 }
