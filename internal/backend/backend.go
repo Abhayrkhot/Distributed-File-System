@@ -11,6 +11,7 @@ import (
 	"log/slog"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/gocql/gocql"
 
@@ -73,9 +74,35 @@ func (f *Flags) Metastore(ctx context.Context, log *slog.Logger) (metastore.Stor
 		return nil, err
 	}
 	log.Info("connecting to cassandra", "hosts", f.Cassandra, "keyspace", f.Keyspace, "consistency", cl)
-	return metastore.NewCassandra(ctx, metastore.CassandraConfig{
-		Hosts: strings.Split(f.Cassandra, ","), Keyspace: f.Keyspace, Replication: f.CassandraRF, Consistency: cl,
+	var ms metastore.Store
+	err = retry(ctx, log, "cassandra", func() error {
+		var err error
+		ms, err = metastore.NewCassandra(ctx, metastore.CassandraConfig{
+			Hosts: strings.Split(f.Cassandra, ","), Keyspace: f.Keyspace, Replication: f.CassandraRF, Consistency: cl,
+		})
+		return err
 	})
+	return ms, err
+}
+
+// retry calls fn until it succeeds or ctx ends. Backends often start after
+// the nodes that use them (e.g. pods in Kubernetes), so waiting here beats
+// exiting and crash-looping.
+func retry(ctx context.Context, log *slog.Logger, what string, fn func() error) error {
+	delay := time.Second
+	for {
+		err := fn()
+		if err == nil {
+			return nil
+		}
+		log.Warn("backend not ready, retrying", "backend", what, "in", delay, "err", err)
+		select {
+		case <-ctx.Done():
+			return fmt.Errorf("%s: %w (last error: %v)", what, ctx.Err(), err)
+		case <-time.After(delay):
+		}
+		delay = min(2*delay, 10*time.Second)
+	}
 }
 
 // Blob opens the configured cold tier. Returns nil, nil if none.
@@ -87,9 +114,13 @@ func (f *Flags) Blob(ctx context.Context, log *slog.Logger) (blob.Store, error) 
 	switch {
 	case f.S3Endpoint != "":
 		log.Info("using S3 tier", "endpoint", f.S3Endpoint, "bucket", f.S3Bucket)
-		s, err = blob.NewS3(ctx, blob.S3Config{
-			Endpoint: f.S3Endpoint, Bucket: f.S3Bucket, AccessKey: f.S3AccessKey, SecretKey: f.S3SecretKey,
-			Region: f.S3Region, UseTLS: f.S3TLS, CreateBucket: true,
+		err = retry(ctx, log, "s3", func() error {
+			var err error
+			s, err = blob.NewS3(ctx, blob.S3Config{
+				Endpoint: f.S3Endpoint, Bucket: f.S3Bucket, AccessKey: f.S3AccessKey, SecretKey: f.S3SecretKey,
+				Region: f.S3Region, UseTLS: f.S3TLS, CreateBucket: true,
+			})
+			return err
 		})
 	case f.BlobDir != "":
 		s, err = blob.NewFS(f.BlobDir)

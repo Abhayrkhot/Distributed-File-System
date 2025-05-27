@@ -49,7 +49,7 @@ func main() {
 		fmt.Fprintln(os.Stderr, "dfs-storage: --id, --data-dir and --meta are required")
 		os.Exit(2)
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute) // waits for backends
 	ms, err := be.Metastore(ctx, log)
 	if err != nil {
 		fatal(err)

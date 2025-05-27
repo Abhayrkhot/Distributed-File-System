@@ -76,7 +76,7 @@ func main() {
 		t.LeaderLeaseTimeout = *lease
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute) // waits for backends
 	ms, err := be.Metastore(ctx, log)
 	if err != nil {
 		fatal(fmt.Sprintf("metastore: %v", err))

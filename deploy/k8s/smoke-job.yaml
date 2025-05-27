@@ -17,5 +17,6 @@ spec:
           command: [/usr/local/bin/dfs-bench, k8s-smoke]
           args:
             - --meta=dfs-meta-0.dfs-meta.dfs.svc.cluster.local:8000,dfs-meta-1.dfs-meta.dfs.svc.cluster.local:8000,dfs-meta-2.dfs-meta.dfs.svc.cluster.local:8000
-            - --files=20
+            - --files=40
             - --size=8MiB
+            - --clients=8

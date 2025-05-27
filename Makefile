@@ -46,7 +46,7 @@ k8s-render:
 	kubectl kustomize deploy/k8s
 
 kind-up:
-	kind create cluster --name $(KIND_CLUSTER)
+	kind create cluster --name $(KIND_CLUSTER) --config deploy/kind/cluster.yaml
 
 kind-deploy: docker
 	kind load docker-image $(IMAGE) --name $(KIND_CLUSTER)

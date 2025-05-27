@@ -1,0 +1,10 @@
+# Local multi-node Kubernetes for the DFS manifests: one control plane and
+# three workers, so pods (Raft members, storage nodes) really spread across
+# nodes. make kind-up uses this.
+kind: Cluster
+apiVersion: kind.x-k8s.io/v1alpha4
+nodes:
+  - role: control-plane
+  - role: worker
+  - role: worker
+  - role: worker

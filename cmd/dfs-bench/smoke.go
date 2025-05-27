@@ -7,6 +7,7 @@ import (
 	"flag"
 	"fmt"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/Abhayrkhot/Distributed-File-System/internal/client"
@@ -22,6 +23,8 @@ func runSmoke(args []string) error {
 	files := fs.Int("files", 20, "files to write")
 	sizeS := fs.String("size", "8MiB", "file size")
 	wait := fs.Duration("wait", 3*time.Minute, "how long to wait for the cluster to come up")
+	clients := fs.Int("clients", 1, "concurrent client streams")
+	minNodes := fs.Int("min-nodes", 3, "wait until at least this many storage nodes are in the ring")
 	fs.Parse(args)
 	size, err := parseSize(*sizeS)
 	if err != nil {
@@ -38,7 +41,7 @@ func runSmoke(args []string) error {
 		st, err := mc.LeaderStatus(ctx)
 		if err == nil {
 			r := meta.RingFromProto(st.Ring)
-			if r.Len() >= 3 {
+			if r.Len() >= *minNodes {
 				nodes = nil
 				for _, m := range r.Members() {
 					nodes = append(nodes, m.Addr)
@@ -55,25 +58,56 @@ func runSmoke(args []string) error {
 	cl := client.New(nodes)
 	defer cl.Close()
 	start := time.Now()
-	var total int64
+	jobs := make(chan int, *files)
 	for i := 0; i < *files; i++ {
-		data := make([]byte, size)
-		rand.Read(data)
-		name := fmt.Sprintf("smoke/%d-%d", time.Now().Unix(), i)
-		if _, err := cl.UploadBytes(ctx, name, data); err != nil {
-			return fmt.Errorf("upload %s: %w", name, err)
-		}
-		var buf bytes.Buffer
-		if _, err := cl.Download(ctx, name, &buf); err != nil {
-			return fmt.Errorf("download %s: %w", name, err)
-		}
-		if !bytes.Equal(buf.Bytes(), data) {
-			return fmt.Errorf("%s: content mismatch", name)
-		}
-		total += size
+		jobs <- i
+	}
+	close(jobs)
+	stamp := time.Now().Unix()
+	var (
+		mu       sync.Mutex
+		firstErr error
+		total    int64
+		wg       sync.WaitGroup
+	)
+	for w := 0; w < *clients; w++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			data := make([]byte, size)
+			for i := range jobs {
+				rand.Read(data)
+				name := fmt.Sprintf("smoke/%d-%d", stamp, i)
+				err := func() error {
+					if _, err := cl.UploadBytes(ctx, name, data); err != nil {
+						return fmt.Errorf("upload %s: %w", name, err)
+					}
+					var buf bytes.Buffer
+					if _, err := cl.Download(ctx, name, &buf); err != nil {
+						return fmt.Errorf("download %s: %w", name, err)
+					}
+					if !bytes.Equal(buf.Bytes(), data) {
+						return fmt.Errorf("%s: content mismatch", name)
+					}
+					return nil
+				}()
+				mu.Lock()
+				if err != nil && firstErr == nil {
+					firstErr = err
+				}
+				if err == nil {
+					total += size
+				}
+				mu.Unlock()
+			}
+		}()
+	}
+	wg.Wait()
+	if firstErr != nil {
+		return firstErr
 	}
 	el := time.Since(start)
-	fmt.Printf("OK: %d files (%d MiB) written and read back in %v (%.1f MB/s round trip)\n",
-		*files, total>>20, el.Round(time.Millisecond), float64(2*total)/1e6/el.Seconds())
+	fmt.Printf("OK: %d files (%d MiB) written and read back by %d clients in %v (%.1f MB/s round trip, upload+download bytes)\n",
+		*files, total>>20, *clients, el.Round(time.Millisecond), float64(2*total)/1e6/el.Seconds())
 	return nil
 }
