@@ -141,10 +141,19 @@ epoch counter. It is committed through hashicorp/raft on three members.
 client-visible committed write on the new leader, including finding it. The
 work behind it, each step measured in [results.md](results.md):
 
-1. **Timing tuned for a LAN.** hashicorp/raft's defaults (1 s heartbeat and
-   election timeouts) are WAN-safe. The `fast` profile shortens them to
-   LAN-scale values. Pre-vote (on by default in hashicorp/raft 1.7+) stops a
-   partitioned follower from disrupting the cluster.
+1. **Timing tuned for a LAN, chosen by measurement.** hashicorp/raft's
+   defaults (1 s heartbeat timeout, 500 ms lease) are WAN-safe and recover in
+   about 2 s. The `fast` profile uses a 200 ms heartbeat timeout, 100 ms
+   leader lease and a **1 s election timeout**. The long election timeout is
+   deliberate: a candidate wins the moment it has its votes, so the timeout
+   only decides when a *failed* election retries. With a 100 ms election
+   timeout, votes delayed by fsync under disk load made candidates give up on
+   elections they would have won, and the cluster stormed (term 2 → 23 in one
+   benchmark). The 200 ms heartbeat timeout came from a scheduling-stall probe
+   on the benchmark host, which saw stalls up to ~250 ms under load. The
+   `aggressive` profile (100 ms / 50 ms) recovers faster when idle but had
+   spurious elections there. Pre-vote (on by default in hashicorp/raft 1.7+)
+   stops a partitioned follower from disrupting the cluster.
 2. **Fewer fsyncs on the election path.** A vote has to be durable before it
    is cast. raft-boltdb costs two fsyncs per write (data pages, then the meta
    page), and on macOS each `F_FULLFSYNC` measured 5–8 ms. An election writes
@@ -158,9 +167,10 @@ work behind it, each step measured in [results.md](results.md):
    between 1× and 2× the timeout. But when the leader *process* crashes, the
    kernel closes its sockets at once, and the follower's read on the leader's
    replication connection returns EOF. The custom stream layer reports that
-   EOF. For one heartbeat window the follower then checks for leader contact
-   with a shorter timeout (`ReloadConfig`, which re-arms raft's follower timer
-   immediately). A false alarm is harmless. A live leader keeps sending
+   EOF. For a short window (10 heartbeat timeouts, extended by every further
+   loss) the follower then checks for leader contact with the lease-length
+   timeout, 100 ms instead of 200 ms. It does this with `ReloadConfig`, which
+   re-arms raft's follower timer immediately. A false alarm is harmless. A live leader keeps sending
    heartbeats every HeartbeatTimeout/10, so the check passes. And if one
    follower does call an election wrongly, pre-vote lets the other voters,
    which still hear the leader, refuse it. A hung leader whose sockets stay

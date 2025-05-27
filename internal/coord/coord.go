@@ -35,6 +35,9 @@ import (
 
 const DefaultChunkSize = 4 << 20
 
+// SlowUpload is the threshold above which an upload logs its time breakdown.
+var SlowUpload = 3 * time.Second
+
 var (
 	ErrNoRing       = errors.New("coord: no storage nodes in the ring yet")
 	ErrQuorum       = errors.New("coord: write quorum not reached")
@@ -120,6 +123,9 @@ func (c *Coordinator) Upload(ctx context.Context, name string, r io.Reader) (met
 	}
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
+	start := time.Now()
+	var tRead, tSem time.Duration
+	var maxChunk atomic.Int64 // ns
 
 	var (
 		fileHash = sha256.New()
@@ -141,15 +147,19 @@ func (c *Coordinator) Upload(ctx context.Context, name string, r io.Reader) (met
 
 	for {
 		bp := c.bufs.Get().(*[]byte)
+		t0 := time.Now()
 		n, rerr := io.ReadFull(r, *bp)
+		tRead += time.Since(t0)
 		if n > 0 {
 			data := (*bp)[:n]
 			fileHash.Write(data)
 			id := cas.ID(data)
 			refs = append(refs, metastore.ChunkRef{ID: id, Size: int64(n)})
 			total += int64(n)
+			t1 := time.Now()
 			select {
 			case sem <- struct{}{}:
+				tSem += time.Since(t1)
 			case <-ctx.Done():
 				c.bufs.Put(bp)
 				wg.Wait()
@@ -161,8 +171,12 @@ func (c *Coordinator) Upload(ctx context.Context, name string, r io.Reader) (met
 			go func() {
 				defer wg.Done()
 				defer func() { <-sem }()
+				t2 := time.Now()
 				if err := c.writeChunk(ctx, id, data, sb); err != nil {
 					fail(fmt.Errorf("chunk %s: %w", id[:12], err))
+				}
+				if d := int64(time.Since(t2)); d > maxChunk.Load() {
+					maxChunk.Store(d) // racy max is fine for diagnostics
 				}
 				sb.release()
 			}()
@@ -177,18 +191,31 @@ func (c *Coordinator) Upload(ctx context.Context, name string, r io.Reader) (met
 			break
 		}
 	}
+	t3 := time.Now()
 	wg.Wait()
+	tDrain := time.Since(t3)
 	if firstErr != nil {
 		return metastore.File{}, firstErr
 	}
+	t4 := time.Now()
 	if err := c.cfg.Meta.PutChunks(ctx, refs); err != nil {
 		return metastore.File{}, fmt.Errorf("coord: record chunks: %w", err)
 	}
+	tCatalog := time.Since(t4)
+	t5 := time.Now()
 	f, err := c.cfg.Meta.CommitFile(ctx, metastore.File{
 		Name: name, Size: total, SHA256: hex.EncodeToString(fileHash.Sum(nil)), Chunks: refs,
 	})
 	if err != nil {
 		return metastore.File{}, fmt.Errorf("coord: commit manifest: %w", err)
+	}
+	tCommit := time.Since(t5)
+	if el := time.Since(start); el > SlowUpload {
+		c.cfg.Logger.Warn("slow upload", "name", name, "bytes", total, "total", el.Round(time.Millisecond),
+			"reading_client", tRead.Round(time.Millisecond), "waiting_for_slots", tSem.Round(time.Millisecond),
+			"slowest_chunk_quorum", time.Duration(maxChunk.Load()).Round(time.Millisecond),
+			"final_chunk_wait", tDrain.Round(time.Millisecond), "catalog", tCatalog.Round(time.Millisecond),
+			"commit", tCommit.Round(time.Millisecond))
 	}
 	return f, nil
 }
@@ -219,7 +246,9 @@ func (c *Coordinator) writeChunk(ctx context.Context, id string, data []byte, sb
 	type res struct {
 		idx int
 		err error
+		dur time.Duration
 	}
+	wstart := time.Now()
 	results := make(chan res, n)
 	for i, m := range prefs {
 		sb.refs.Add(1)
@@ -229,7 +258,13 @@ func (c *Coordinator) writeChunk(ctx context.Context, id string, data []byte, sb
 			// their own deadline rather than the request context.
 			pctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), c.cfg.RPCTimeout)
 			defer cancel()
-			results <- res{i, c.putReplica(pctx, m, id, data, i == 0)}
+			t := time.Now()
+			err := c.putReplica(pctx, m, id, data, i == 0)
+			if d := time.Since(t); d > SlowUpload/2 {
+				c.cfg.Logger.Warn("slow replica write", "chunk", id[:12], "replica", m.ID, "dur", d.Round(time.Millisecond),
+					"since_chunk_start", time.Since(wstart).Round(time.Millisecond), "err", err)
+			}
+			results <- res{i, err, time.Since(t)}
 		}(i, m)
 	}
 	ok, done := 0, 0

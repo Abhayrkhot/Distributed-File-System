@@ -75,6 +75,7 @@ type ThroughputResult struct {
 	RingEpochEnd   uint64        `json:"ring_epoch_end"` // before the repair phase; equal means no node was marked DOWN under load
 	GOMAXPROCS     int           `json:"child_gomaxprocs"`
 	MetaArgs       string        `json:"extra_meta_args,omitempty"`
+	BackupWorkers  int           `json:"s3_backup_workers_per_node"`
 	CPUSamples     []CPUSample   `json:"cpu_samples,omitempty"`
 	Notes          []string      `json:"notes"`
 }
@@ -139,6 +140,7 @@ func runThroughput(args []string) error {
 	procs := fs.Int("gomaxprocs", 2, "GOMAXPROCS for each dfs-meta/dfs-storage process (0: Go default, all cores). "+
 		"53 processes each defaulting to every core spend their CPU in scheduler spinning; 2 is what Go picks for a pod with a 2-CPU limit")
 	extraMeta := fs.String("meta-args", "", "extra dfs-meta flags, space separated")
+	backupWorkers := fs.Int("backup-workers", 4, "S3 write-behind workers per storage node")
 	raftLog := fs.String("raft-log-level", "warn", "dfs-meta raft log level")
 	fs.Parse(args)
 
@@ -172,7 +174,7 @@ func runThroughput(args []string) error {
 	}
 	defer func() { cs.DropKeyspace(context.Background()); cs.Close() }()
 
-	res := ThroughputResult{GOMAXPROCS: *procs, MetaArgs: *extraMeta, Env: hostEnv(), MetaNodes: *metaN, StorageNodes: *storageN, Clients: *clients, FileSize: fileSize,
+	res := ThroughputResult{GOMAXPROCS: *procs, MetaArgs: *extraMeta, BackupWorkers: *backupWorkers, Env: hostEnv(), MetaNodes: *metaN, StorageNodes: *storageN, Clients: *clients, FileSize: fileSize,
 		ChunkSize: chunk, Replicas: 3, WriteQuorum: 2, Fsync: *fsync, Metastore: "cassandra " + cassHosts}
 	env := []string{"DFS_KEYSPACE=" + keyspace, "DFS_S3_BUCKET=" + bucket, "DFS_S3_ENCRYPTION_KEY=" + hex.EncodeToString(encKey)}
 	if *procs > 0 {
@@ -198,7 +200,7 @@ func runThroughput(args []string) error {
 	} else {
 		defer os.RemoveAll(dir)
 	}
-	storageArgs := []string{"--log-level", "warn", "--chunk-size", fmt.Sprint(chunk)}
+	storageArgs := []string{"--log-level", "warn", "--chunk-size", fmt.Sprint(chunk), "--backup-workers", fmt.Sprint(*backupWorkers)}
 	if *fsync {
 		storageArgs = append(storageArgs, "--fsync")
 	}

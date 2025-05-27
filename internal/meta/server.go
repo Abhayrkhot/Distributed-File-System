@@ -162,6 +162,7 @@ type Server struct {
 	done     chan struct{}
 
 	suspect     atomic.Bool
+	suspectGen  atomic.Uint64
 	FastDetects atomic.Int64 // times a closed connection shortened the timeout
 
 	dfsv1.UnimplementedMetaServiceServer
@@ -424,23 +425,30 @@ func (s *Server) onPeerConnLost() {
 	if r == nil || r.State() != raft.Follower {
 		return
 	}
-	if !s.suspect.CompareAndSwap(false, true) {
-		return
-	}
 	s.FastDetects.Add(1)
-	cur := r.ReloadableConfig()
-	fast := cur
-	fast.HeartbeatTimeout = max(s.cfg.Timing.LeaderLeaseTimeout, s.cfg.Timing.HeartbeatTimeout/2)
-	if err := r.ReloadConfig(fast); err != nil {
-		s.log.Debug("fast crash detect: reload failed", "err", err)
-		s.suspect.Store(false)
-		return
+	// Each loss starts or extends the suspect window. Without the
+	// generation check, a restore scheduled by an earlier loss (say, the
+	// churn when a peer restarted) could fire in the middle of detecting a
+	// real crash and put the long timeout back.
+	gen := s.suspectGen.Add(1)
+	if s.suspect.CompareAndSwap(false, true) {
+		cur := r.ReloadableConfig()
+		fast := cur
+		fast.HeartbeatTimeout = max(s.cfg.Timing.LeaderLeaseTimeout, s.cfg.Timing.HeartbeatTimeout/2)
+		if err := r.ReloadConfig(fast); err != nil {
+			s.log.Debug("fast crash detect: reload failed", "err", err)
+			s.suspect.Store(false)
+			return
+		}
 	}
 	time.AfterFunc(10*s.cfg.Timing.HeartbeatTimeout, func() {
 		select {
 		case <-s.done:
 			return
 		default:
+		}
+		if s.suspectGen.Load() != gen {
+			return // a later loss extended the window
 		}
 		restore := r.ReloadableConfig()
 		restore.HeartbeatTimeout = s.cfg.Timing.HeartbeatTimeout

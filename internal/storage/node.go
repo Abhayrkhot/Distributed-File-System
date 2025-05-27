@@ -267,7 +267,7 @@ func (n *Node) backupWorker() {
 			return
 		case id := <-n.backupQ:
 			n.backupsActive.Add(1)
-			err := n.backup(n.ctx, id, false)
+			err := n.backup(n.ctx, id, true) // skip chunks a repair pass already uploaded
 			n.backupsActive.Add(-1)
 			if err != nil && n.ctx.Err() == nil {
 				n.backupsFailed.Add(1)
