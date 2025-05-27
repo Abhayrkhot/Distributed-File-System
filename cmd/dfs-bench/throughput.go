@@ -73,6 +73,9 @@ type ThroughputResult struct {
 	RaftTermEnd    uint64        `json:"raft_term_end"` // before the repair phase; equal means no elections under load
 	RingEpochStart uint64        `json:"ring_epoch_start"`
 	RingEpochEnd   uint64        `json:"ring_epoch_end"` // before the repair phase; equal means no node was marked DOWN under load
+	GOMAXPROCS     int           `json:"child_gomaxprocs"`
+	MetaArgs       string        `json:"extra_meta_args,omitempty"`
+	CPUSamples     []CPUSample   `json:"cpu_samples,omitempty"`
 	Notes          []string      `json:"notes"`
 }
 
@@ -133,6 +136,9 @@ func runThroughput(args []string) error {
 	bin := fs.String("bin", repoBin(), "directory with dfs-meta and dfs-storage")
 	label := fs.String("label", "", "suffix for the result file name")
 	keep := fs.Bool("keep", false, "keep the cluster's data and logs directory")
+	procs := fs.Int("gomaxprocs", 2, "GOMAXPROCS for each dfs-meta/dfs-storage process (0: Go default, all cores). "+
+		"53 processes each defaulting to every core spend their CPU in scheduler spinning; 2 is what Go picks for a pod with a 2-CPU limit")
+	extraMeta := fs.String("meta-args", "", "extra dfs-meta flags, space separated")
 	raftLog := fs.String("raft-log-level", "warn", "dfs-meta raft log level")
 	fs.Parse(args)
 
@@ -166,9 +172,12 @@ func runThroughput(args []string) error {
 	}
 	defer func() { cs.DropKeyspace(context.Background()); cs.Close() }()
 
-	res := ThroughputResult{Env: hostEnv(), MetaNodes: *metaN, StorageNodes: *storageN, Clients: *clients, FileSize: fileSize,
+	res := ThroughputResult{GOMAXPROCS: *procs, MetaArgs: *extraMeta, Env: hostEnv(), MetaNodes: *metaN, StorageNodes: *storageN, Clients: *clients, FileSize: fileSize,
 		ChunkSize: chunk, Replicas: 3, WriteQuorum: 2, Fsync: *fsync, Metastore: "cassandra " + cassHosts}
 	env := []string{"DFS_KEYSPACE=" + keyspace, "DFS_S3_BUCKET=" + bucket, "DFS_S3_ENCRYPTION_KEY=" + hex.EncodeToString(encKey)}
+	if *procs > 0 {
+		env = append(env, fmt.Sprintf("GOMAXPROCS=%d", *procs))
+	}
 	var s3 *blob.S3
 	if cfg, ok := blob.S3ConfigFromEnv(); ok {
 		cfg.Bucket, cfg.CreateBucket = bucket, true
@@ -197,7 +206,8 @@ func runThroughput(args []string) error {
 	start := time.Now()
 	c, err := localcluster.Start(ctx, localcluster.Options{
 		BinDir: *bin, Dir: dir, Meta: *metaN, Storage: *storageN, Env: env,
-		MetaArgs:    []string{"--timing", "fast", "--dead-after", "3s", "--repair-interval", "1h", "--log-level", "info", "--raft-log-level", *raftLog},
+		MetaArgs: append([]string{"--timing", "fast", "--dead-after", "3s", "--repair-interval", "1h", "--log-level", "info", "--raft-log-level", *raftLog},
+			strings.Fields(*extraMeta)...),
 		StorageArgs: storageArgs,
 	})
 	if err != nil {
@@ -230,6 +240,7 @@ func runThroughput(args []string) error {
 	var upBytes, upErrs, upRetries atomic.Int64
 	var mu sync.Mutex
 	var upLat []float64
+	stopSampler := sampleCPU(&res.CPUSamples, 5*time.Second)
 	fmt.Printf("upload: %d files x %s from %d clients\n", nFiles, *fileSizeS, *clients)
 	t0 := time.Now()
 	var wg sync.WaitGroup
@@ -380,6 +391,7 @@ func runThroughput(args []string) error {
 		res.Download.MBps, res.Download.MiBps, dlDur.Round(time.Millisecond), res.Download.Files, res.Download.Errors,
 		res.Download.Mismatches, res.Download.LatencyMs.P50, res.Download.LatencyMs.P99)
 
+	stopSampler()
 	if st, err := mc.LeaderStatus(ctx); err == nil {
 		res.RaftTermEnd, res.RingEpochEnd = st.Term, st.Ring.Epoch
 	}
@@ -504,4 +516,87 @@ func measureRepair(ctx context.Context, c *localcluster.Cluster, mc *meta.Client
 		rr.ReadsAfterRepair++
 	}
 	return rr, nil
+}
+
+// CPUSample is host CPU use by process group, in percent of one core.
+type CPUSample struct {
+	AtSec   float64            `json:"at_s"`
+	ByGroup map[string]float64 `json:"by_group"`
+	// MaxTimerLateMs is the worst wake-up delay of a 5 ms sleep in the
+	// benchmark process over the interval: a proxy for OS scheduling stalls
+	// that every process on the host (including the Raft members) also sees.
+	MaxTimerLateMs float64 `json:"max_timer_late_ms"`
+}
+
+// sampleCPU records `ps` CPU use grouped by program every interval until the
+// returned stop function is called, and prints each sample.
+func sampleCPU(out *[]CPUSample, every time.Duration) func() {
+	start := time.Now()
+	done := make(chan struct{})
+	finished := make(chan struct{})
+	var lateMu sync.Mutex
+	var maxLate time.Duration
+	go func() {
+		for {
+			select {
+			case <-done:
+				return
+			default:
+			}
+			t0 := time.Now()
+			time.Sleep(5 * time.Millisecond)
+			late := time.Since(t0) - 5*time.Millisecond
+			lateMu.Lock()
+			maxLate = max(maxLate, late)
+			lateMu.Unlock()
+		}
+	}()
+	go func() {
+		defer close(finished)
+		t := time.NewTicker(every)
+		defer t.Stop()
+		for {
+			select {
+			case <-done:
+				return
+			case <-t.C:
+			}
+			raw, err := runCmd("ps", "-axo", "%cpu=,comm=")
+			if err != nil {
+				continue
+			}
+			g := map[string]float64{}
+			for _, line := range strings.Split(raw, "\n") {
+				f := strings.Fields(line)
+				if len(f) < 2 {
+					continue
+				}
+				var pct float64
+				fmt.Sscan(f[0], &pct)
+				name := strings.Join(f[1:], " ")
+				if i := strings.LastIndexByte(name, '/'); i >= 0 {
+					name = name[i+1:]
+				}
+				switch {
+				case strings.HasPrefix(name, "dfs-"), name == "java", name == "minio":
+				case strings.HasPrefix(name, "mds"), strings.HasPrefix(name, "mdworker"):
+					name = "spotlight"
+				case strings.Contains(name, "Virtualization"):
+					name = "docker-vm"
+				default:
+					name = "other"
+				}
+				g[name] += pct
+			}
+			lateMu.Lock()
+			late := maxLate
+			maxLate = 0
+			lateMu.Unlock()
+			smp := CPUSample{AtSec: time.Since(start).Seconds(), ByGroup: g, MaxTimerLateMs: ms(late)}
+			*out = append(*out, smp)
+			fmt.Printf("  cpu@%3.0fs: timer-late max %5.1fms  storage %.0f%%  meta %.0f%%  bench %.0f%%  cassandra %.0f%%  minio %.0f%%  spotlight %.0f%%  docker-vm %.0f%%  other %.0f%%\n",
+				smp.AtSec, smp.MaxTimerLateMs, g["dfs-storage"], g["dfs-meta"], g["dfs-bench"], g["java"], g["minio"], g["spotlight"], g["docker-vm"], g["other"])
+		}
+	}()
+	return func() { close(done); <-finished }
 }

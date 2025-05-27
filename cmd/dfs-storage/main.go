@@ -8,6 +8,8 @@ import (
 	"context"
 	"flag"
 	"fmt"
+	"net/http"
+	_ "net/http/pprof"
 	"os"
 	"os/signal"
 	"strings"
@@ -34,11 +36,15 @@ func main() {
 		hbEvery   = flag.Duration("heartbeat", 250*time.Millisecond, "heartbeat interval")
 		workers   = flag.Int("backup-workers", 4, "concurrent S3 uploads")
 		logLevel  = flag.String("log-level", "info", "debug, info, warn, error")
+		debugAddr = flag.String("debug-addr", "", "serve net/http/pprof on this address (e.g. 127.0.0.1:6060)")
 		be        backend.Flags
 	)
 	be.Register(flag.CommandLine)
 	flag.Parse()
 	log := backend.Logger(*logLevel)
+	if *debugAddr != "" {
+		go func() { log.Warn("pprof server exited", "err", http.ListenAndServe(*debugAddr, nil)) }()
+	}
 	if *id == "" || *dataDir == "" || *metaAddrs == "" {
 		fmt.Fprintln(os.Stderr, "dfs-storage: --id, --data-dir and --meta are required")
 		os.Exit(2)

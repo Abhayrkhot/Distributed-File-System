@@ -50,6 +50,11 @@ func startCluster(t *testing.T, opts cluster.Options) *cluster.Cluster {
 			if err != nil {
 				t.Fatalf("s3: %v", err)
 			}
+			t.Cleanup(func() {
+				cctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+				defer cancel()
+				s3.RemoveAll(cctx)
+			})
 			key := make([]byte, 32)
 			rand.Read(key)
 			enc, _ := blob.NewEncrypted(s3, key)

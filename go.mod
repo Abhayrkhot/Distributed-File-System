@@ -1,6 +1,6 @@
 module github.com/Abhayrkhot/Distributed-File-System
 
-go 1.27.3
+go 1.26.0
 
 require (
 	github.com/gocql/gocql v1.7.0

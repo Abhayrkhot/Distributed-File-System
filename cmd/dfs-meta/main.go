@@ -11,6 +11,8 @@ import (
 	"context"
 	"flag"
 	"fmt"
+	"net/http"
+	_ "net/http/pprof"
 	"os"
 	"os/signal"
 	"strings"
@@ -34,7 +36,7 @@ func main() {
 		noSync        = flag.Bool("raft-no-sync", false, "skip fsync on the Raft log (unsafe; bolt store only; for comparison benchmarks)")
 		logStore      = flag.String("raft-store", "wal", "Raft storage: wal (segment log + single-fsync stable store) or bolt")
 		fastDetect    = flag.Bool("fast-crash-detect", true, "shorten the follower heartbeat timeout when the leader's connection closes")
-		timing        = flag.String("timing", "fast", "Raft timing profile: fast (LAN-tuned) or default (hashicorp defaults)")
+		timing        = flag.String("timing", "fast", "Raft timing profile: fast (LAN-tuned), aggressive (faster, less stable under host stalls) or default (hashicorp defaults)")
 		hb            = flag.Duration("heartbeat-timeout", 0, "override Raft heartbeat timeout")
 		el            = flag.Duration("election-timeout", 0, "override Raft election timeout")
 		lease         = flag.Duration("leader-lease", 0, "override Raft leader lease timeout")
@@ -42,12 +44,16 @@ func main() {
 		replicas      = flag.Int("replicas", 3, "replication factor the repair pass maintains")
 		repairEvery   = flag.Duration("repair-interval", 30*time.Second, "periodic repair pass interval")
 		logLevel      = flag.String("log-level", "info", "debug, info, warn, error")
+		debugAddr     = flag.String("debug-addr", "", "serve net/http/pprof on this address (e.g. 127.0.0.1:6060)")
 		raftLevel     = flag.String("raft-log-level", "warn", "hashicorp/raft log level")
 		be            backend.Flags
 	)
 	be.Register(flag.CommandLine)
 	flag.Parse()
 	log := backend.Logger(*logLevel)
+	if *debugAddr != "" {
+		go func() { log.Warn("pprof server exited", "err", http.ListenAndServe(*debugAddr, nil)) }()
+	}
 
 	if *id == "" {
 		fatal("--id is required")

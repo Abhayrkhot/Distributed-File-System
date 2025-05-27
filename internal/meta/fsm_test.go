@@ -101,7 +101,7 @@ func TestFSMSnapshotRestore(t *testing.T) {
 }
 
 func TestTimingProfiles(t *testing.T) {
-	for _, name := range []string{"", "fast", "default"} {
+	for _, name := range []string{"", "fast", "aggressive", "default"} {
 		if _, err := TimingProfile(name); err != nil {
 			t.Fatal(err)
 		}

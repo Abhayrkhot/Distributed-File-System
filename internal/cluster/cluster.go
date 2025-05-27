@@ -41,7 +41,7 @@ type Options struct {
 	ManualRepair bool
 	// NoBlob runs without an S3 tier.
 	NoBlob bool
-	Logger       *slog.Logger
+	Logger *slog.Logger
 }
 
 type Cluster struct {

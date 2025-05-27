@@ -46,13 +46,34 @@ var DefaultTiming = Timing{
 	CommitTimeout:      50 * time.Millisecond,
 }
 
-// FastTiming is tuned for a single datacenter / LAN, where round trips are
-// well under a millisecond. Followers notice a dead leader after 100-200 ms
-// (raft randomises the heartbeat timeout between 1x and 2x) and a pre-vote
-// plus election round completes in a few ms on top of that.
+// FastTiming is tuned for a single datacenter / LAN. A follower notices a
+// silent leader after 200-400 ms (raft randomises the heartbeat timeout
+// between 1x and 2x), or 100-200 ms after the leader's connection drops
+// when FastCrashDetect is on.
+//
+// The election timeout is long on purpose. A candidate becomes leader the
+// moment it has its votes; the timeout only decides when a *failed* election
+// is retried. Each vote is fsynced, and under heavy disk load that can take
+// longer than 100 ms, so a short election timeout makes candidates abandon
+// elections that would have succeeded, and the cluster storms.
+//
+// 200 ms heartbeat and 100 ms lease were chosen from measurements: on the
+// benchmark host, OS scheduling stalls reached ~250 ms under load, and the
+// aggressive profile (100 ms / 50 ms) saw spurious elections there. See
+// docs/results.md.
 var FastTiming = Timing{
+	HeartbeatTimeout:   200 * time.Millisecond,
+	ElectionTimeout:    1000 * time.Millisecond,
+	LeaderLeaseTimeout: 100 * time.Millisecond,
+	CommitTimeout:      5 * time.Millisecond,
+}
+
+// AggressiveTiming halves the heartbeat timeout and lease. It recovers
+// faster on an idle cluster but has spurious elections when the hosts stall
+// for ~100 ms (seen under the 50-node load on one machine).
+var AggressiveTiming = Timing{
 	HeartbeatTimeout:   100 * time.Millisecond,
-	ElectionTimeout:    100 * time.Millisecond,
+	ElectionTimeout:    1000 * time.Millisecond,
 	LeaderLeaseTimeout: 50 * time.Millisecond,
 	CommitTimeout:      5 * time.Millisecond,
 }
@@ -62,10 +83,12 @@ func TimingProfile(name string) (Timing, error) {
 	switch name {
 	case "", "fast":
 		return FastTiming, nil
+	case "aggressive":
+		return AggressiveTiming, nil
 	case "default":
 		return DefaultTiming, nil
 	}
-	return Timing{}, fmt.Errorf("unknown raft timing profile %q (want fast or default)", name)
+	return Timing{}, fmt.Errorf("unknown raft timing profile %q (want fast, aggressive or default)", name)
 }
 
 // Peer is one member of the Raft group.

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/Abhayrkhot/Distributed-File-System/internal/localcluster"
@@ -18,6 +19,7 @@ type FailoverResult struct {
 	Timing     string    `json:"timing"`
 	RaftStore  string    `json:"raft_store"`
 	FastDetect bool      `json:"fast_crash_detect"`
+	MetaArgs   string    `json:"extra_meta_args,omitempty"`
 	RaftSync   bool      `json:"raft_fsync"`
 	MetaNodes  int       `json:"meta_nodes"`
 	Storage    int       `json:"storage_nodes"`
@@ -39,10 +41,12 @@ type FailoverResult struct {
 func runFailover(args []string) error {
 	fs := flag.NewFlagSet("failover", flag.ExitOnError)
 	trials := fs.Int("trials", 30, "number of leader failures")
-	timing := fs.String("timing", "fast", "raft timing profile passed to dfs-meta (fast|default)")
+	timing := fs.String("timing", "fast", "raft timing profile passed to dfs-meta (fast|aggressive|default)")
 	mode := fs.String("mode", "crash", "crash (SIGKILL), freeze (SIGSTOP: sockets stay open), term (SIGTERM: graceful handover) or transfer (leadership-transfer RPC)")
 	store := fs.String("raft-store", "wal", "Raft storage passed to dfs-meta: wal or bolt")
 	fastDetect := fs.Bool("fast-crash-detect", true, "enable connection-loss crash detection in dfs-meta")
+	extraMeta := fs.String("meta-args", "", "extra dfs-meta flags, space separated")
+	label := fs.String("label", "", "suffix for the result file name")
 	metaN := fs.Int("meta", 3, "control-plane members")
 	storageN := fs.Int("storage", 10, "storage nodes heartbeating to the leader during the run")
 	noSync := fs.Bool("raft-no-sync", false, "disable Raft log fsync")
@@ -59,6 +63,7 @@ func runFailover(args []string) error {
 
 	metaArgs := []string{"--timing", *timing, "--raft-log-level", "error", "--log-level", "warn",
 		"--raft-store", *store, fmt.Sprintf("--fast-crash-detect=%v", *fastDetect)}
+	metaArgs = append(metaArgs, strings.Fields(*extraMeta)...)
 	if *noSync {
 		metaArgs = append(metaArgs, "--raft-no-sync")
 	}
@@ -79,7 +84,7 @@ func runFailover(args []string) error {
 	mc.RetryInterval = time.Millisecond
 	mc.AttemptTimeout = 100 * time.Millisecond
 
-	res := FailoverResult{Env: hostEnv(), Mode: *mode, Timing: *timing, RaftSync: !*noSync, RaftStore: *store, FastDetect: *fastDetect, MetaNodes: *metaN,
+	res := FailoverResult{Env: hostEnv(), Mode: *mode, Timing: *timing, RaftSync: !*noSync, RaftStore: *store, FastDetect: *fastDetect, MetaArgs: *extraMeta, MetaNodes: *metaN,
 		Storage: *storageN, Trials: *trials,
 		Definition: "time from removing the leader (signal or transfer RPC) until a client's first successful Raft-committed write, including new-leader discovery"}
 
@@ -165,6 +170,9 @@ func runFailover(args []string) error {
 	fmt.Printf("\nrecovery (ms): %s  failed=%d\n", res.RecoveryMs, res.Failed)
 	name := fmt.Sprintf("failover-%s-%s-%s%s%s.json", *mode, *timing, *store,
 		map[bool]string{true: "-nosync", false: ""}[*noSync], map[bool]string{true: "", false: "-nodetect"}[*fastDetect])
+	if *label != "" {
+		name = strings.TrimSuffix(name, ".json") + "-" + *label + ".json"
+	}
 	p, err := writeJSON(*out, name, res)
 	if err != nil {
 		return err

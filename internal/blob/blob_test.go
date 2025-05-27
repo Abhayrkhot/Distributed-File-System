@@ -135,6 +135,7 @@ func TestS3Conformance(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	defer s.RemoveAll(context.Background())
 	conformance(t, s)
 }
 
