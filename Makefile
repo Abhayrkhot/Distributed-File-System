@@ -5,7 +5,7 @@ KIND_CLUSTER ?= dfs
 IMAGE ?= dfs:dev
 
 .PHONY: build test test-race integration proto deps-up deps-down bench-throughput bench-failover \
-        docker kind-up kind-deploy kind-smoke kind-down k8s-render lint clean
+        docker kind-up kind-deploy kind-smoke kind-e2e kind-down k8s-render lint clean
 
 build:
 	go build -o $(BIN)/ ./cmd/...
@@ -59,6 +59,11 @@ kind-smoke:
 	kubectl --context kind-$(KIND_CLUSTER) -n dfs apply -f deploy/k8s/smoke-job.yaml
 	kubectl --context kind-$(KIND_CLUSTER) -n dfs wait --for=condition=complete job/dfs-smoke --timeout=600s
 	kubectl --context kind-$(KIND_CLUSTER) -n dfs logs job/dfs-smoke
+
+# Fresh 4-node kind cluster: deploy, smoke, scale to 50 storage pods,
+# throughput Job, then force-delete a storage pod and the Raft leader pod.
+kind-e2e:
+	scripts/kind-e2e.sh
 
 kind-down:
 	kind delete cluster --name $(KIND_CLUSTER)

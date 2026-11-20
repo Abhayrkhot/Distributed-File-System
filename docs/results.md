@@ -1,17 +1,48 @@
 # Results
 
-Two environments:
+## Summary
 
-- **60 machines on Explorer** (Northeastern's HPC cluster, Slurm). Every
-  storage node, Raft member and the backends ran on its own machine, so all
+| Claim | Measured | Where |
+|---|---|---|
+| 50+ storage nodes | 60 storage nodes on 60 separate machines (Slurm); 50 storage pods on Kubernetes | [Explorer](#60-machines-on-explorer), [Kubernetes](#kubernetes-kind-4-nodes-on-one-linux-host) |
+| Aggregate throughput | median 1,129 MB/s upload and 1,227 MB/s download; 7,286 files, 0 errors, 0 checksum mismatches | [Explorer](#throughput-consistency-and-stability) |
+| Raft leader recovery | 193 ms median (p90 228 ms) after a leader crash, against 2.1 s with hashicorp/raft defaults; 5 ms for a planned handover | [Raft](#raft-leader-recovery) |
+| Replica repair | a crashed storage node marked DOWN in 4.8 s; its 113 chunks re-replicated in a 0.94 s pass; 0 under-replicated afterwards | [Explorer](#throughput-consistency-and-stability) |
+| S3-backed replication | integration suite passes against AWS S3, including restoring chunks after all three replicas were lost | [AWS S3](#aws-s3-as-the-s3-tier) |
+
+What the measurements showed beyond the numbers:
+
+- **Crash detection mattered most for Raft recovery.** LAN timing took
+  recovery from 2.1 s to ~0.4 s. Detecting a crashed leader from its closed
+  TCP connection, instead of waiting out a randomized heartbeat timeout,
+  halved it again. A long election timeout is free when elections succeed,
+  and a short one caused election storms under load.
+- **Testing at scale found real bugs**, listed in
+  [what testing at scale found](#what-testing-at-scale-found). The worst:
+  committed files unreadable after membership changes, until reads learned to
+  locate chunks on any node.
+- **Several numbers are bounded by the environment, not the system.** One
+  client machine's ~10 Gb/s link caps the aggregate throughput, and a single
+  MinIO, or a home uplink to AWS S3, makes the S3 copies lag behind uploads.
+  A laptop shared with everything else is not a usable benchmark host.
+- **On dedicated machines the control plane was quiet.** There were no
+  elections and no false node evictions during the 60-machine runs, against
+  dozens of elections on the oversubscribed laptop.
+
+## Environments
+
+- **60 machines on Explorer** (Northeastern's HPC cluster, Slurm): every
+  storage node, Raft member and the backends on its own machine, so all
   traffic crossed the real cluster network. Throughput, consistency and
-  repair numbers come from here.
-- **One Linux host** (20 cores, 61 GB RAM). The Raft failover matrix ran here:
-  3 `dfs-meta` processes plus 10 heartbeating storage nodes, 30 leader kills
-  per configuration.
+  repair numbers.
+- **One Linux host** (20 cores, 61 GB RAM): the Raft failover matrix (3
+  `dfs-meta` processes plus 10 heartbeating storage nodes, 30 leader kills per
+  configuration) and the AWS S3 runs.
+- **Kubernetes:** a 4-node kind cluster on the same Linux host, running
+  `deploy/k8s` with 50 storage pods.
 
 The raw JSON (per-file latency distributions, CPU samples, scheduling-stall
-probe) is in `bench/results-hpc/` and `bench/results/`.
+probe) is in `bench/results-hpc/`, `bench/results/` and `bench/results-aws/`.
 `scripts/results-table.py` renders the tables below from it.
 
 ## 60 machines on Explorer
@@ -150,22 +181,30 @@ SIGTERM. So this likely measured the planned-handover path. The crash
 
 Before the Slurm deployment, the same benchmarks ran as 53–67 OS processes
 on a 16 GB Apple M4 laptop, sharing its CPU and SSD with Cassandra, MinIO
-and the user's other containers. That surfaced most of the bugs fixed during
-development (table below). But the throughput there was capped by the SSD's
-writeback, and varied 70–500 MB/s from run to run. `close()` on a freshly
-written 4 MiB file had a p99 of 1–2 s with 50 concurrent writers, and the
-receiving node spent most of a slow upload in exactly that step. Those
-numbers are not reported as results.
+and the user's other containers. That surfaced most of the bugs below. But
+throughput there was capped by the SSD's writeback and varied 70–500 MB/s
+from run to run. `close()` on a freshly written 4 MiB file had a p99 of 1–2 s
+with 50 concurrent writers, and a slow upload spent most of its time in
+exactly that step on the receiving node. macOS's `F_FULLFSYNC` (5–8 ms per
+call) also dominated Raft's election path, and OS scheduling stalls of
+hundreds of ms caused leader elections. Those numbers are not reported as
+results.
 
-| Finding | Fix |
-|---|---|
-| Uploads stalled 13 s: gocql dialled hosts it discovered on its default port 9042, not the configured one | Set `ClusterConfig.Port` from the contact points |
-| Committed files unreadable after membership churn: chunks sat outside the 5 nodes the new ring pointed at | Reads locate holders on every known node before trying S3 (`TestReadsDuringRingChurnBeforeRepair`) |
-| Storage nodes burned 7–8 cores to move 20 MB/s: 53 processes each with `GOMAXPROCS=10` spun in the Go scheduler | `GOMAXPROCS=2` per process (what Go picks for a 2-CPU pod); upload 20 → 91 MB/s in the same run |
-| Election storms (term 2 → 23 in one run): a 100 ms election timeout was shorter than a vote's fsync under load | 1 s election timeout (free on success), 200 ms heartbeat |
-| A third of failovers took the slow path: an old restore timer reset the crash-detect window mid-failover | Generation counter on the window |
-| Duplicate S3 uploads after elections | Write-behind skips chunks a repair pass already uploaded |
-| On Slurm, fixed ports collided with node_exporter (9100), and some nodes advertised an address other nodes couldn't reach | Each process takes a free port; addresses come from the network all nodes share |
+## What testing at scale found
+
+| Where | Finding | Fix |
+|---|---|---|
+| Data path | Uploads stalled 13 s: gocql dialled hosts it discovered on its default port 9042, not the configured one | Set `ClusterConfig.Port` from the contact points |
+| Data path | Committed files unreadable after membership churn: chunks sat outside the 5 nodes the new ring pointed at | Reads locate holders on every known node before trying S3 (`TestReadsDuringRingChurnBeforeRepair`) |
+| Data path | Duplicate S3 uploads after elections | Write-behind skips chunks a repair pass already uploaded |
+| Processes | Storage nodes burned 7–8 cores to move 20 MB/s: 53 processes each with `GOMAXPROCS=10` spun in the Go scheduler | `GOMAXPROCS=2` per process (what Go picks for a 2-CPU pod); upload 20 → 91 MB/s in the same run |
+| Raft | Election storms (term 2 → 23 in one run): a 100 ms election timeout was shorter than a vote's fsync under load | 1 s election timeout (free on success), 200 ms heartbeat |
+| Raft | A third of failovers took the slow path: an old restore timer reset the crash-detect window mid-failover | Generation counter on the window (same laptop: p90 499 → 285 ms) |
+| Raft | Each election wrote term and vote with ~15 macOS `F_FULLFSYNC` calls through BoltDB | raft-wal log plus a single-fsync stable store |
+| Slurm | Fixed ports collided with node_exporter (9100), and some nodes advertised an address other nodes couldn't reach | Each process takes a free port; addresses come from the network all nodes share |
+| Slurm | A node-kill signalled through a file on `/scratch` (NFS) arrived ~30 s late | `kill-node.sh` crashes the process through `srun` into its job |
+| Kubernetes | kube-proxy on kind workers failed with "too many open files", so pods couldn't resolve DNS | `fs.inotify.max_user_instances=512` on the Linux host |
+| AWS | A bucket per test run doesn't work when bucket names are global, and secrets in flags are poor practice | One bucket with a key prefix per run; the standard AWS credential chain |
 
 ## DHT routing (unit tests)
 
@@ -195,6 +234,29 @@ Raft failover matrix on one host:
 ```bash
 ONLY=failover-baseline,failover-fast-bolt,failover-fast-wal,failover-final,failover-freeze,failover-graceful,failover-aggressive scripts/run-benchmarks.sh
 ```
+
+Against AWS S3 (any bucket you can write; credentials come from the standard
+AWS chain, e.g. `AWS_PROFILE`; Cassandra from `scripts/dev-deps.sh up`):
+
+```bash
+export DFS_S3_ENDPOINT=s3.us-east-2.amazonaws.com DFS_S3_TLS=1 DFS_S3_REGION=us-east-2 DFS_S3_BUCKET=<bucket> DFS_CASSANDRA=127.0.0.1:19042
+```
+
+```bash
+go test -count=1 ./internal/blob ./test/integration
+```
+
+```bash
+bin/dfs-bench throughput --storage 50 --total 768MiB --backup-workers 2
+```
+
+On Kubernetes (kind; on Linux raise `fs.inotify.max_user_instances` to 512):
+
+```bash
+scripts/kind-e2e.sh
+```
+
+Render the tables:
 
 ```bash
 python3 scripts/results-table.py

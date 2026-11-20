@@ -230,6 +230,9 @@ chunk (restored from S3).
 - **One client in the benchmarks.** The 60-machine Slurm runs drive the
   cluster from a single client machine, whose ~10 Gb/s link caps the
   aggregate numbers (see [results.md](results.md)).
+- **A few duplicate S3 uploads.** About 3% of chunks were uploaded to S3
+  twice in the AWS run (197 uploads for 192 chunks). It is harmless, since
+  objects are content-addressed, but wastes a little bandwidth.
 - **One MinIO in the large runs.** The S3 tier in the 60-machine runs is a
   single MinIO process, so write-behind lags uploads by about a minute at
   1 GB/s. The tier was also verified against AWS S3 (see

@@ -51,6 +51,18 @@ if hpc:
                   f"{r['restored_ms']/1000:.2f} s after the kill; verify pass: {r['verify_under_replicated']} of {r['verify_chunks_scanned']} under-replicated; "
                   f"{r['files_read_back_after_repair'] - r['read_errors_after_repair']}/{r['files_read_back_after_repair']} files read back OK.\n")
 
+# ---- AWS S3 as the S3 tier ----
+aws_root = os.path.join(os.path.dirname(root.rstrip("/")) or ".", "results-aws")
+for p in sorted(glob.glob(os.path.join(aws_root, "throughput-*.json"))):
+    with open(p) as f:
+        d = json.load(f)
+    u, dl = d["upload"], d["download"]
+    print("### AWS S3 as the S3 tier\n")
+    print("| Storage nodes | Cold tier | Upload MB/s | Download MB/s (30 s) | Errors | Checksum mismatches | S3 drain after upload |")
+    print("|---|---|---|---|---|---|---|")
+    print(f"| {d['storage_nodes']} | {d['cold_tier']} | {u['mb_per_s']:.0f} | {dl['mb_per_s']:.0f} | "
+          f"{u['errors'] + dl['errors']} | {dl['checksum_mismatches']} | {d['s3_writebehind_drain_ms']/1000:.0f} s |\n")
+
 tp = load("throughput-*nodes-r*.json")
 by_n = {}
 for name, d in tp:

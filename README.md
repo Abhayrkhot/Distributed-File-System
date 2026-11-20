@@ -28,6 +28,23 @@ failover. Details and caveats are in [docs/results.md](docs/results.md).
 The aggregate rate is bounded by the single client machine's ~10 Gb/s
 link, not by the cluster.
 
+### What we learned
+
+- **Crash detection mattered most for Raft recovery.** LAN timing took
+  recovery from 2.1 s to ~0.4 s; detecting a crashed leader from its closed
+  TCP connection halved it again. A long election timeout is free when
+  elections succeed, and a short one caused election storms under load.
+- **Testing at scale found real bugs.** Committed files became unreadable
+  after membership changes until reads learned to locate chunks on any node.
+  A Cassandra driver dialled the wrong port, and a crash-detection race sent
+  a third of failovers down the slow path. The full list is in
+  [docs/results.md](docs/results.md#what-testing-at-scale-found).
+- **Know what bounds a number.** One client's network link capped the
+  throughput, and a single MinIO, or a home uplink to S3, lagged the S3
+  copies. On a shared laptop, disk writeback and OS stalls swamped
+  everything; on dedicated machines the control plane saw no elections at
+  all.
+
 ## How it works
 
 ```
@@ -112,6 +129,17 @@ for i in 0 1 2; do bin/dfs-meta --id meta-$i --raft-bind 127.0.0.1:710$i --grpc-
   --peers $P --bootstrap --data-dir /tmp/dfs/meta-$i & done
 for i in 0 1 2 3 4 5; do bin/dfs-storage --id node-0$i --bind 127.0.0.1:910$i --data-dir /tmp/dfs/node-0$i \
   --meta 127.0.0.1:8100,127.0.0.1:8101,127.0.0.1:8102 & done
+```
+
+### With AWS S3
+
+Point the S3 tier at a bucket you can write. With no `DFS_S3_ACCESS_KEY`
+set, credentials come from the standard AWS chain (`AWS_PROFILE`,
+environment, or an instance role). `DFS_S3_PREFIX` lets several clusters
+share one bucket.
+
+```bash
+export DFS_S3_ENDPOINT=s3.us-east-2.amazonaws.com DFS_S3_TLS=1 DFS_S3_REGION=us-east-2 DFS_S3_BUCKET=<bucket> DFS_S3_ENCRYPTION_KEY=$(openssl rand -hex 32)
 ```
 
 ## Tests
