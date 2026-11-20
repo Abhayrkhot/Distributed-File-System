@@ -1,0 +1,434 @@
+{
+  "env": {
+    "host": "one Linux host (20 cores): 50 storage processes, S3 tier = AWS S3 us-east-2 over a ~44 Mb/s home uplink",
+    "cpu": "amd64",
+    "num_cpu": 20,
+    "go_version": "go1.26.8",
+    "os": "linux/amd64",
+    "when": "2026-11-20T00:08:13Z"
+  },
+  "meta_nodes": 3,
+  "storage_nodes": 50,
+  "clients": 32,
+  "file_size": 16777216,
+  "chunk_size": 4194304,
+  "replicas": 3,
+  "write_quorum": 2,
+  "chunk_fsync": false,
+  "metastore": "cassandra 127.0.0.1:19042",
+  "cold_tier": "s3 (AWS S3) s3.us-east-2.amazonaws.com, AES-256-GCM",
+  "upload": {
+    "files": 48,
+    "bytes": 805306368,
+    "seconds": 1.300988232,
+    "mb_per_s": 618.9958895800374,
+    "mib_per_s": 590.3204818535207,
+    "errors": 0,
+    "retries": 0,
+    "checksum_mismatches": 0,
+    "per_file_latency_ms": {
+      "n": 48,
+      "min": 325.361,
+      "p50": 693.831,
+      "p90": 1166.428,
+      "p99": 1218.763,
+      "max": 1218.763,
+      "mean": 745.0767916666667
+    }
+  },
+  "s3_writebehind_drain_ms": 113940.143,
+  "s3_backups_done": 197,
+  "download": {
+    "files": 2559,
+    "bytes": 42932895744,
+    "seconds": 30.180091845,
+    "mb_per_s": 1422.5568286702476,
+    "mib_per_s": 1356.6559111311412,
+    "errors": 0,
+    "retries": 0,
+    "checksum_mismatches": 0,
+    "per_file_latency_ms": {
+      "n": 2559,
+      "min": 134.017,
+      "p50": 354.446,
+      "p90": 532.755,
+      "p99": 776.109,
+      "max": 1299.114,
+      "mean": 376.6766041422429
+    }
+  },
+  "repair": {
+    "victim": "node-25",
+    "victim_chunks": 12,
+    "victim_bytes": 50331648,
+    "detect_ms": 2994.029,
+    "repair_pass_ms": 2507,
+    "restored_ms": 5980,
+    "replicas_repaired": 12,
+    "verify_under_replicated": 0,
+    "verify_chunks_scanned": 192,
+    "files_read_back_after_repair": 40,
+    "read_errors_after_repair": 0
+  },
+  "storage_nodes_total_rss_mib": 5109.5,
+  "raft_term_start": 2,
+  "raft_term_end": 2,
+  "ring_epoch_start": 50,
+  "ring_epoch_end": 50,
+  "child_gomaxprocs": 2,
+  "s3_backup_workers_per_node": 2,
+  "cpu_samples": [
+    {
+      "at_s": 5.049770492,
+      "by_group": {
+        "dfs-bench": 52.3,
+        "dfs-meta": 53.1,
+        "dfs-storage": 403.40000000000003,
+        "java": 10,
+        "minio": 0.6,
+        "other": 420.3000000000009
+      },
+      "max_timer_late_ms": 21.198
+    },
+    {
+      "at_s": 10.028549335,
+      "by_group": {
+        "dfs-bench": 33.6,
+        "dfs-meta": 49.400000000000006,
+        "dfs-storage": 224.60000000000005,
+        "java": 10,
+        "minio": 0.6,
+        "other": 220.2999999999999
+      },
+      "max_timer_late_ms": 2.007
+    },
+    {
+      "at_s": 15.037948795,
+      "by_group": {
+        "dfs-bench": 26.8,
+        "dfs-meta": 48.8,
+        "dfs-storage": 164.80000000000004,
+        "java": 10,
+        "minio": 0.6,
+        "other": 320.3000000000009
+      },
+      "max_timer_late_ms": 1.044
+    },
+    {
+      "at_s": 20.036704869,
+      "by_group": {
+        "dfs-bench": 23.7,
+        "dfs-meta": 48.8,
+        "dfs-storage": 133.50000000000003,
+        "java": 10,
+        "minio": 0.6,
+        "other": 320.3000000000009
+      },
+      "max_timer_late_ms": 1.077
+    },
+    {
+      "at_s": 25.036152927,
+      "by_group": {
+        "dfs-bench": 21.7,
+        "dfs-meta": 49.00000000000001,
+        "dfs-storage": 115.70000000000003,
+        "java": 10,
+        "minio": 0.6,
+        "other": 120.29999999999981
+      },
+      "max_timer_late_ms": 3.022
+    },
+    {
+      "at_s": 30.042695036,
+      "by_group": {
+        "dfs-bench": 20.2,
+        "dfs-meta": 49.00000000000001,
+        "dfs-storage": 102.80000000000003,
+        "java": 10,
+        "minio": 0.6,
+        "other": 120.09999999999982
+      },
+      "max_timer_late_ms": 1.076
+    },
+    {
+      "at_s": 35.029200641,
+      "by_group": {
+        "dfs-bench": 19.1,
+        "dfs-meta": 48.7,
+        "dfs-storage": 95.2,
+        "java": 10,
+        "minio": 0.6,
+        "other": 220.0999999999999
+      },
+      "max_timer_late_ms": 1.206
+    },
+    {
+      "at_s": 40.044050877,
+      "by_group": {
+        "dfs-bench": 18.3,
+        "dfs-meta": 48.800000000000004,
+        "dfs-storage": 88.1,
+        "java": 10,
+        "minio": 0.6,
+        "other": 120.09999999999982
+      },
+      "max_timer_late_ms": 1.14
+    },
+    {
+      "at_s": 45.038875305,
+      "by_group": {
+        "dfs-bench": 17.9,
+        "dfs-meta": 48.800000000000004,
+        "dfs-storage": 83.60000000000005,
+        "java": 10,
+        "minio": 0.6,
+        "other": 120.09999999999982
+      },
+      "max_timer_late_ms": 1.132
+    },
+    {
+      "at_s": 50.027847297,
+      "by_group": {
+        "dfs-bench": 17.3,
+        "dfs-meta": 48.800000000000004,
+        "dfs-storage": 78.30000000000001,
+        "java": 10,
+        "minio": 0.6,
+        "other": 220.1999999999999
+      },
+      "max_timer_late_ms": 2.643
+    },
+    {
+      "at_s": 55.037331134,
+      "by_group": {
+        "dfs-bench": 16.9,
+        "dfs-meta": 48.800000000000004,
+        "dfs-storage": 75.70000000000003,
+        "java": 10,
+        "minio": 0.6,
+        "other": 120.19999999999982
+      },
+      "max_timer_late_ms": 1.131
+    },
+    {
+      "at_s": 60.052725683,
+      "by_group": {
+        "dfs-bench": 16.5,
+        "dfs-meta": 48.900000000000006,
+        "dfs-storage": 72.39999999999999,
+        "java": 10,
+        "minio": 0.6,
+        "other": 120.09999999999982
+      },
+      "max_timer_late_ms": 1.655
+    },
+    {
+      "at_s": 65.054424745,
+      "by_group": {
+        "dfs-bench": 16.5,
+        "dfs-meta": 48.900000000000006,
+        "dfs-storage": 71.70000000000002,
+        "java": 10,
+        "minio": 0.6,
+        "other": 120.09999999999982
+      },
+      "max_timer_late_ms": 1.039
+    },
+    {
+      "at_s": 70.050957232,
+      "by_group": {
+        "dfs-bench": 16.3,
+        "dfs-meta": 48.900000000000006,
+        "dfs-storage": 68.90000000000002,
+        "java": 10,
+        "minio": 0.6,
+        "other": 120.09999999999982
+      },
+      "max_timer_late_ms": 1.757
+    },
+    {
+      "at_s": 75.027040108,
+      "by_group": {
+        "dfs-bench": 16,
+        "dfs-meta": 48.5,
+        "dfs-storage": 67.50000000000003,
+        "java": 10,
+        "minio": 0.6,
+        "other": 224.0999999999999
+      },
+      "max_timer_late_ms": 1.024
+    },
+    {
+      "at_s": 80.036609166,
+      "by_group": {
+        "dfs-bench": 15.8,
+        "dfs-meta": 48.5,
+        "dfs-storage": 65.2,
+        "java": 10,
+        "minio": 0.6,
+        "other": 120.09999999999982
+      },
+      "max_timer_late_ms": 1.039
+    },
+    {
+      "at_s": 85.039563305,
+      "by_group": {
+        "dfs-bench": 15.7,
+        "dfs-meta": 48.5,
+        "dfs-storage": 63.60000000000001,
+        "java": 10,
+        "minio": 0.6,
+        "other": 120.09999999999982
+      },
+      "max_timer_late_ms": 1.134
+    },
+    {
+      "at_s": 90.04840202,
+      "by_group": {
+        "dfs-bench": 15.6,
+        "dfs-meta": 48.5,
+        "dfs-storage": 62.50000000000001,
+        "java": 10,
+        "minio": 0.6,
+        "other": 120.09999999999982
+      },
+      "max_timer_late_ms": 1.029
+    },
+    {
+      "at_s": 95.03665707,
+      "by_group": {
+        "dfs-bench": 15.5,
+        "dfs-meta": 48.5,
+        "dfs-storage": 61.599999999999994,
+        "java": 10,
+        "minio": 0.6,
+        "other": 320.10000000000093
+      },
+      "max_timer_late_ms": 1.06
+    },
+    {
+      "at_s": 100.030521719,
+      "by_group": {
+        "dfs-bench": 15.5,
+        "dfs-meta": 48.6,
+        "dfs-storage": 60.3,
+        "java": 10,
+        "minio": 0.6,
+        "other": 120.09999999999982
+      },
+      "max_timer_late_ms": 1.076
+    },
+    {
+      "at_s": 105.041014643,
+      "by_group": {
+        "dfs-bench": 15.4,
+        "dfs-meta": 48.6,
+        "dfs-storage": 59.50000000000001,
+        "java": 10,
+        "minio": 0.6,
+        "other": 120.09999999999982
+      },
+      "max_timer_late_ms": 2.481
+    },
+    {
+      "at_s": 110.033283258,
+      "by_group": {
+        "dfs-bench": 15.3,
+        "dfs-meta": 48.6,
+        "dfs-storage": 58.4,
+        "java": 10,
+        "minio": 0.6,
+        "other": 120.09999999999982
+      },
+      "max_timer_late_ms": 1.081
+    },
+    {
+      "at_s": 115.040224096,
+      "by_group": {
+        "dfs-bench": 15.2,
+        "dfs-meta": 48.6,
+        "dfs-storage": 57.90000000000001,
+        "java": 10,
+        "minio": 0.6,
+        "other": 120.09999999999982
+      },
+      "max_timer_late_ms": 1.069
+    },
+    {
+      "at_s": 120.109478366,
+      "by_group": {
+        "dfs-bench": 27.4,
+        "dfs-meta": 48.5,
+        "dfs-storage": 93.80000000000001,
+        "java": 10,
+        "minio": 0.6,
+        "other": 120.09999999999982
+      },
+      "max_timer_late_ms": 32.996
+    },
+    {
+      "at_s": 125.162410397,
+      "by_group": {
+        "dfs-bench": 43.2,
+        "dfs-meta": 48.4,
+        "dfs-storage": 139.50000000000006,
+        "java": 10,
+        "minio": 0.6,
+        "other": 320.10000000000093
+      },
+      "max_timer_late_ms": 41.657
+    },
+    {
+      "at_s": 130.325296299,
+      "by_group": {
+        "dfs-bench": 58.1,
+        "dfs-meta": 48.4,
+        "dfs-storage": 182.29999999999998,
+        "java": 10,
+        "minio": 0.6,
+        "other": 120.09999999999982
+      },
+      "max_timer_late_ms": 28.684
+    },
+    {
+      "at_s": 135.292199648,
+      "by_group": {
+        "dfs-bench": 71.8,
+        "dfs-meta": 48.4,
+        "dfs-storage": 221.20000000000005,
+        "java": 10,
+        "minio": 0.6,
+        "other": 620.1000000000006
+      },
+      "max_timer_late_ms": 36.114
+    },
+    {
+      "at_s": 140.118367577,
+      "by_group": {
+        "dfs-bench": 84,
+        "dfs-meta": 48.4,
+        "dfs-storage": 256.49999999999994,
+        "java": 10,
+        "minio": 0.6,
+        "other": 315.4000000000009
+      },
+      "max_timer_late_ms": 41.677
+    },
+    {
+      "at_s": 145.172400394,
+      "by_group": {
+        "dfs-bench": 95.5,
+        "dfs-meta": 48.4,
+        "dfs-storage": 289.6,
+        "java": 10,
+        "minio": 0.6,
+        "other": 695.1000000000006
+      },
+      "max_timer_late_ms": 61.103
+    }
+  ],
+  "notes": [
+    "All processes, Cassandra and MinIO run on one host and talk over loopback; MB/s counts file bytes, each of which is written to 3 replicas (plus 1 S3 copy).",
+    "Download throughput includes SHA-256 verification of every file on the client."
+  ]
+}

@@ -230,6 +230,7 @@ chunk (restored from S3).
 - **One client in the benchmarks.** The 60-machine Slurm runs drive the
   cluster from a single client machine, whose ~10 Gb/s link caps the
   aggregate numbers (see [results.md](results.md)).
-- **One MinIO.** The S3 tier in the benchmarks is a single MinIO process, so
-  write-behind lags uploads by about a minute at 1 GB/s. Real S3 or a
-  distributed MinIO would remove that.
+- **One MinIO in the large runs.** The S3 tier in the 60-machine runs is a
+  single MinIO process, so write-behind lags uploads by about a minute at
+  1 GB/s. The tier was also verified against AWS S3 (see
+  [results.md](results.md#aws-s3-as-the-s3-tier)), but at home-uplink speed.

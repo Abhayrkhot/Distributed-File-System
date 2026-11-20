@@ -22,6 +22,7 @@ failover. Details and caveats are in [docs/results.md](docs/results.md).
 | Storage-node crash | marked DOWN in 4.8 s; 113 chunks re-replicated in a 0.94 s pass; 0 of 2,304 chunks under-replicated afterwards |
 | Raft leader crash → writes again | **193 ms** median (p90 228 ms) over 30 SIGKILLs, against 2.1 s with hashicorp/raft defaults; 5 ms for a planned handover |
 | Control-plane stability | 0 leader elections and 0 false node evictions during the 60-machine runs |
+| AWS S3 tier | integration suite passes against AWS S3, including restoring chunks from S3 after all three replicas were lost |
 | Kubernetes (kind, 4 nodes) | scaled to 50 storage pods; 1,472 MB/s download with 0 errors; a storage pod and the Raft leader pod force-deleted with no client errors |
 
 The aggregate rate is bounded by the single client machine's ~10 Gb/s

@@ -104,6 +104,27 @@ trials per configuration.
   not the default because it had spurious elections on the overloaded
   laptop, where stalls reached hundreds of ms.
 
+## AWS S3 as the S3 tier
+
+The tables above use MinIO, which speaks the S3 API. The same code was also
+run against **AWS S3** (`us-east-2`). The bucket was private, default-encrypted,
+and had a 7-day expiry. Chunks are additionally AES-256-GCM-encrypted before
+upload. Credentials came from the standard AWS chain, with no keys in flags.
+
+| Check | Result |
+|---|---|
+| S3 conformance test (put, get, exists, list, delete, encryption) | pass |
+| Full integration suite with AWS S3 + Cassandra (19 tests) | pass; `TestRestoreFromS3AfterTotalReplicaLoss` restored 6 chunks from AWS S3 after all three replicas of each were wiped |
+| Throughput run: 50 storage processes on one Linux host | 619 MB/s upload, 1,423 MB/s download (30 s), 0 errors, 0 checksum mismatches |
+| S3 write-behind in that run | 768 MiB reached AWS S3 114 s after the upload finished (~6.7 MB/s) |
+| Repair in that run (one storage process SIGKILLed) | DOWN in 3.0 s; 12 chunks re-replicated; verify pass 0 of 192 under-replicated |
+
+The write-behind rate is the host's home internet uplink (64 MiB copied
+with the AWS CLI also ran at 5.4 MB/s), not S3 or the system. Replicas are
+written before the S3 copy, so uploads ran at full speed regardless. Nodes
+reported 197 S3 uploads for 192 chunks: a few chunks were uploaded twice,
+which costs a little bandwidth but no correctness.
+
 ## Kubernetes (kind, 4 nodes on one Linux host)
 
 `scripts/kind-e2e.sh` builds the image and creates a fresh kind cluster (1
