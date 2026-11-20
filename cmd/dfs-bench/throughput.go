@@ -593,7 +593,7 @@ func startLocal(ctx context.Context, res *ThroughputResult, o localOpts) (*local
 		return nil, nil, fmt.Errorf("DFS_CASSANDRA must point at Cassandra (scripts/dev-deps.sh up); the processes share one metastore")
 	}
 	keyspace := fmt.Sprintf("dfs_bench_%d", o.stamp)
-	bucket := fmt.Sprintf("dfs-bench-%d", o.stamp)
+	prefix := fmt.Sprintf("bench-%d/", o.stamp)
 	encKey := make([]byte, 32)
 	rand.Read(encKey)
 	res.Metastore = "cassandra " + cassHosts
@@ -611,18 +611,22 @@ func startLocal(ctx context.Context, res *ThroughputResult, o localOpts) (*local
 	}
 	cleanups = append(cleanups, func() { cs.DropKeyspace(context.Background()); cs.Close() })
 
-	env := []string{"DFS_KEYSPACE=" + keyspace, "DFS_S3_BUCKET=" + bucket, "DFS_S3_ENCRYPTION_KEY=" + hex.EncodeToString(encKey)}
+	env := []string{"DFS_KEYSPACE=" + keyspace, "DFS_S3_PREFIX=" + prefix, "DFS_S3_ENCRYPTION_KEY=" + hex.EncodeToString(encKey)}
 	if o.procs > 0 {
 		env = append(env, fmt.Sprintf("GOMAXPROCS=%d", o.procs))
 	}
 	out := &localBenchWithS3{}
 	if cfg, ok := blob.S3ConfigFromEnv(); ok {
-		cfg.Bucket, cfg.CreateBucket = bucket, true
+		cfg.Prefix, cfg.CreateBucket = prefix, true
 		if out.s3, err = blob.NewS3(ctx, cfg); err != nil {
 			cleanup()
 			return nil, nil, err
 		}
-		res.ColdTier = "s3 (MinIO) " + cfg.Endpoint + ", AES-256-GCM"
+		kind := "MinIO"
+		if strings.HasSuffix(cfg.Endpoint, "amazonaws.com") {
+			kind = "AWS S3"
+		}
+		res.ColdTier = "s3 (" + kind + ") " + cfg.Endpoint + ", AES-256-GCM"
 		cleanups = append(cleanups, func() {
 			cctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 			defer cancel()

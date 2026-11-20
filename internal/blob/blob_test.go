@@ -127,7 +127,7 @@ func TestS3Conformance(t *testing.T) {
 	if !ok {
 		t.Skip("DFS_S3_ENDPOINT not set")
 	}
-	cfg.Bucket = cfg.Bucket + "-conformance"
+	cfg.Prefix = fmt.Sprintf("conformance-%d/", time.Now().UnixNano())
 	cfg.CreateBucket = true
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()

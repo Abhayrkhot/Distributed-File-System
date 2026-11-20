@@ -44,7 +44,9 @@ func startCluster(t *testing.T, opts cluster.Options) *cluster.Cluster {
 	}
 	if opts.Blob == nil && !opts.NoBlob {
 		if cfg, ok := blob.S3ConfigFromEnv(); ok {
-			cfg.Bucket = fmt.Sprintf("dfs-it-%d", time.Now().UnixNano()%1e9)
+			// One shared bucket, a key prefix per test (bucket names are
+			// global on AWS S3).
+			cfg.Prefix = fmt.Sprintf("it-%d/", time.Now().UnixNano())
 			cfg.CreateBucket = true
 			s3, err := blob.NewS3(ctx, cfg)
 			if err != nil {

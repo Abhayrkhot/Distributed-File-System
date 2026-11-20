@@ -28,6 +28,7 @@ type Flags struct {
 	MemoryMeta  bool
 	S3Endpoint  string
 	S3Bucket    string
+	S3Prefix    string
 	S3AccessKey string
 	S3SecretKey string
 	S3Region    string
@@ -52,7 +53,8 @@ func (f *Flags) Register(fs *flag.FlagSet) {
 	fs.BoolVar(&f.MemoryMeta, "memory-metastore", false, "use an in-process metastore (single process only)")
 	fs.StringVar(&f.S3Endpoint, "s3-endpoint", env("DFS_S3_ENDPOINT", ""), "S3 endpoint host:port (env DFS_S3_ENDPOINT); empty disables the S3 tier")
 	fs.StringVar(&f.S3Bucket, "s3-bucket", env("DFS_S3_BUCKET", "dfs-chunks"), "S3 bucket")
-	fs.StringVar(&f.S3AccessKey, "s3-access-key", env("DFS_S3_ACCESS_KEY", ""), "S3 access key (env DFS_S3_ACCESS_KEY)")
+	fs.StringVar(&f.S3Prefix, "s3-prefix", env("DFS_S3_PREFIX", ""), "key prefix inside the bucket, to share one bucket (env DFS_S3_PREFIX)")
+	fs.StringVar(&f.S3AccessKey, "s3-access-key", env("DFS_S3_ACCESS_KEY", ""), "S3 access key (env DFS_S3_ACCESS_KEY); empty: the standard AWS credential chain (AWS_PROFILE, env, instance role)")
 	fs.StringVar(&f.S3SecretKey, "s3-secret-key", env("DFS_S3_SECRET_KEY", ""), "S3 secret key (env DFS_S3_SECRET_KEY)")
 	fs.StringVar(&f.S3Region, "s3-region", env("DFS_S3_REGION", ""), "S3 region")
 	fs.BoolVar(&f.S3TLS, "s3-tls", env("DFS_S3_TLS", "") == "1", "use TLS for S3")
@@ -113,11 +115,11 @@ func (f *Flags) Blob(ctx context.Context, log *slog.Logger) (blob.Store, error) 
 	)
 	switch {
 	case f.S3Endpoint != "":
-		log.Info("using S3 tier", "endpoint", f.S3Endpoint, "bucket", f.S3Bucket)
+		log.Info("using S3 tier", "endpoint", f.S3Endpoint, "bucket", f.S3Bucket, "prefix", f.S3Prefix)
 		err = retry(ctx, log, "s3", func() error {
 			var err error
 			s, err = blob.NewS3(ctx, blob.S3Config{
-				Endpoint: f.S3Endpoint, Bucket: f.S3Bucket, AccessKey: f.S3AccessKey, SecretKey: f.S3SecretKey,
+				Endpoint: f.S3Endpoint, Bucket: f.S3Bucket, Prefix: f.S3Prefix, AccessKey: f.S3AccessKey, SecretKey: f.S3SecretKey,
 				Region: f.S3Region, UseTLS: f.S3TLS, CreateBucket: true,
 			})
 			return err
